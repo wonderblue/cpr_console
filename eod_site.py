@@ -366,7 +366,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     Bullish CPR is the strict narrow, above-band breakout shortlist; Bullish Bias includes all rows with bullish CPR geometry.
   </footer>
   <script>window.CPR_PAYLOAD_URL = "payload.json";</script>
-  <script src="assets/app.js?v=7"></script>
+  <script src="assets/app.js?v=8"></script>
 </body>
 </html>
 """
@@ -728,7 +728,8 @@ function downloads() {
     ["Watchlist", d.watchlist],
     ["Wide CPR", d.wide],
     ["Narrow", d.narrow],
-    ["Bullish", d.bullish],
+    ["Bullish CPR", d.bullish],
+    ["Bullish Bias", d.bullish_bias],
     ["Bearish", d.bearish],
     ["Top 20", d.top20],
     ["Weekly", d.weekly],
@@ -922,6 +923,8 @@ function render() {
   if (tab === "watchlist") extra = " · every setup with levels to trade next session";
   if (tab === "best") extra = " · Daily Long/Short ranked by confluence, liquid, F&O first";
   if (tab === "mylist") extra = " · symbols saved in this browser";
+  if (tab === "bullish") extra = " · strict narrow CPR + close above band + bullish geometry";
+  if (tab === "bullish_bias") extra = " · all bullish CPR geometry; not necessarily a narrow breakout";
   $("count").textContent = `${data.length} rows${extra}`;
   const cols = tab === "follow" ? FOLLOW_COLS : COLS;
   $("head").innerHTML = "<tr>" + cols.map(c =>
