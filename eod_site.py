@@ -127,6 +127,7 @@ def _write_downloads(result: ScanResult, dest: Path) -> dict:
         "full": ("cpr_full.csv", result.full),
         "narrow": ("cpr_narrow.csv", result.narrow),
         "bullish": ("cpr_bullish.csv", result.bullish),
+        "bullish_bias": ("cpr_bullish_bias.csv", result.bullish_bias),
         "bearish": ("cpr_bearish.csv", result.bearish),
         "top20": ("cpr_top20_narrow.csv", result.top20),
         "best": ("cpr_best.csv", result.best),
@@ -168,6 +169,7 @@ def _write_downloads(result: ScanResult, dest: Path) -> dict:
         "full": "downloads/cpr_full.csv",
         "narrow": "downloads/cpr_narrow.csv",
         "bullish": "downloads/cpr_bullish.csv",
+        "bullish_bias": "downloads/cpr_bullish_bias.csv",
         "bearish": "downloads/cpr_bearish.csv",
         "top20": "downloads/cpr_top20_narrow.csv",
         "best": "downloads/cpr_best.csv",
@@ -220,6 +222,7 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
             "full": _records(result.full),
             "narrow": _records(result.narrow),
             "bullish": _records(result.bullish),
+            "bullish_bias": _records(result.bullish_bias),
             "bearish": _records(result.bearish),
             "top20": _records(result.top20),
             "best": _records(result.best) if not result.best.empty else [],
@@ -314,7 +317,8 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     <button data-tab="best" class="on">Best today</button>
     <button data-tab="full">Full</button>
     <button data-tab="narrow">Narrow</button>
-    <button data-tab="bullish">Bullish</button>
+    <button data-tab="bullish">Bullish CPR</button>
+    <button data-tab="bullish_bias">Bullish Bias</button>
     <button data-tab="bearish">Bearish</button>
     <button data-tab="top20">Top 20</button>
     <button data-tab="watchlist">Watchlist</button>
@@ -359,6 +363,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     Top 20 ranks liquid setups (median VALUE ≥ ₹2 cr) by confluence then width percentile.
     Follow-through compares each setup’s prior-day CPR band to this session’s close.
     Wide CPR adds separate consolidation and range-breakout states; it does not replace the existing Narrow CPR setup labels.
+    Bullish CPR is the strict narrow, above-band breakout shortlist; Bullish Bias includes all rows with bullish CPR geometry.
   </footer>
   <script>window.CPR_PAYLOAD_URL = "payload.json";</script>
   <script src="assets/app.js?v=7"></script>

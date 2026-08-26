@@ -124,6 +124,7 @@ class ScanResult:
     watchlist: pd.DataFrame = field(default_factory=pd.DataFrame)
     follow_through: pd.DataFrame = field(default_factory=pd.DataFrame)
     wide: pd.DataFrame = field(default_factory=pd.DataFrame)
+    bullish_bias: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _nse_session() -> requests.Session:
@@ -409,6 +410,7 @@ def scan_from_cached_bhavcopy(
     if write_csv:
         return export_results(cash_df, date, output_dir=output_dir, verbose=False)
     full_table, narrow, bullish, bearish, top20 = split_shortlists(cash_df)
+    bullish_bias = cash_df[cash_df["Bias"] == "Bullish"].copy() if "Bias" in cash_df.columns else pd.DataFrame()
     return ScanResult(
         date=date,
         cash_rows=len(cash_df),
@@ -419,6 +421,7 @@ def scan_from_cached_bhavcopy(
         bearish=bearish,
         top20=top20,
         output_dir=Path(output_dir) if output_dir is not None else OUTPUT_DIR,
+        bullish_bias=bullish_bias,
     )
 
 
@@ -1145,6 +1148,10 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
     if not set(WIDE_FIELDS).issubset(full.columns):
         full = attach_wide_strategy(full)
     _, narrow, bullish, bearish, top20 = split_shortlists(full)
+    bullish_bias = full[full["Bias"] == "Bullish"].copy() if "Bias" in full.columns else pd.DataFrame()
+    bullish_bias_path = output_dir / f"cpr_bullish_bias_{date}.csv"
+    if bullish_bias_path.exists():
+        bullish_bias = pd.read_csv(bullish_bias_path)
     fo_available = "Segment" in full.columns and bool((full["Segment"] == "F&O + Cash").any())
     best = pd.DataFrame()
     watchlist = pd.DataFrame()
@@ -1177,6 +1184,7 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         best=best,
         watchlist=watchlist,
         wide=wide,
+        bullish_bias=bullish_bias,
     )
     weekly_path = output_dir / f"cpr_weekly_{date}.csv"
     monthly_path = output_dir / f"cpr_monthly_{date}.csv"
@@ -1354,6 +1362,17 @@ def follow_through(prev_full: pd.DataFrame, cur_full: pd.DataFrame) -> pd.DataFr
     return merged.reset_index(drop=True)
 
 
+def bullish_bias_view(df: pd.DataFrame) -> pd.DataFrame:
+    """Return every row with bullish CPR geometry, independent of width/close breakout filters.
+
+    This is intentionally separate from ``cpr_bullish_*.csv`` / ``Bullish_CPR``:
+    the latter is the strict narrow, above-band breakout shortlist.
+    """
+    if "Bias" not in df.columns:
+        return df.iloc[0:0].copy()
+    return df[df["Bias"].astype(str).str.strip().eq("Bullish")].copy().reset_index(drop=True)
+
+
 def split_shortlists(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     full_table = df.sort_values(["Confluence_Score", "CPR_Width_Pct"], ascending=[False, True], na_position="last").reset_index(drop=True) if "Confluence_Score" in df.columns else df.sort_values("CPR_Width_Pct").reset_index(drop=True)
     narrow = df[df["CPR_Class"] == "Narrow"].sort_values("CPR_Width_Pct").reset_index(drop=True)
@@ -1421,10 +1440,12 @@ def export_results(
     df = attach_confirmation_score(df)
     df = attach_wide_strategy(df)
     full_table, narrow, bullish, bearish, top20 = split_shortlists(df)
+    bullish_bias = bullish_bias_view(df)
 
     full_table.to_csv(output_dir / f"cpr_full_{date}.csv", index=False)
     narrow.to_csv(output_dir / f"cpr_narrow_{date}.csv", index=False)
     bullish.to_csv(output_dir / f"cpr_bullish_{date}.csv", index=False)
+    bullish_bias.to_csv(output_dir / f"cpr_bullish_bias_{date}.csv", index=False)
     bearish.to_csv(output_dir / f"cpr_bearish_{date}.csv", index=False)
     top20.to_csv(output_dir / f"cpr_top20_narrow_{date}.csv", index=False)
     best = compute_best(df)
@@ -1439,6 +1460,7 @@ def export_results(
         print(f"✓ Full table: {output_dir / f'cpr_full_{date}.csv'}")
         print(f"✓ Narrow CPR: {len(narrow)} symbols → {output_dir / f'cpr_narrow_{date}.csv'}")
         print(f"✓ Bullish CPR: {len(bullish)} symbols → {output_dir / f'cpr_bullish_{date}.csv'}")
+        print(f"✓ Bullish Bias: {len(bullish_bias)} symbols → {output_dir / f'cpr_bullish_bias_{date}.csv'}")
         print(f"✓ Bearish CPR: {len(bearish)} symbols → {output_dir / f'cpr_bearish_{date}.csv'}")
         print(f"✓ Top 20 Narrow: {output_dir / f'cpr_top20_narrow_{date}.csv'}")
         print(f"✓ Best today: {len(best)} symbols → {output_dir / f'cpr_best_{date}.csv'}")
@@ -1459,6 +1481,7 @@ def export_results(
         best=best,
         watchlist=watchlist,
         wide=wide,
+        bullish_bias=bullish_bias,
     )
 
 
