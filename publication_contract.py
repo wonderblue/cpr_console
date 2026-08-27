@@ -55,14 +55,9 @@ def _date_from_name(path: Path) -> Optional[str]:
 
 
 def _scan_dates(output_dir: Path) -> list[str]:
-    return sorted(
-        {
-            date
-            for path in output_dir.glob("cpr_full_*.csv")
-            if (date := _date_from_name(path)) is not None
-        },
-        reverse=True,
-    )
+    from nse_cpr_scanner import discover_scan_dates
+
+    return discover_scan_dates(output_dir)
 
 
 def _read_csv_checked(path: Path, required: set[str], allow_empty: bool = True) -> pd.DataFrame:
@@ -95,17 +90,19 @@ def validate_output_dir(output_dir: Path, expected_date: Optional[str] = None) -
 
     checked = 0
     row_counts: dict[str, int] = {}
+    from nse_cpr_scanner import resolve_scan_csv
+
     for date in dates:
-        full = _read_csv_checked(output_dir / f"cpr_full_{date}.csv", DAILY_REQUIRED, allow_empty=False)
+        full = _read_csv_checked(resolve_scan_csv("full", date, output_dir), DAILY_REQUIRED, allow_empty=False)
         row_counts[date] = int(len(full))
         checked += 1
         for suffix in ("narrow", "bullish", "bearish", "top20_narrow", "best", "watchlist"):
-            path = output_dir / f"cpr_{suffix}_{date}.csv"
+            path = resolve_scan_csv(suffix, date, output_dir)
             if path.exists():
                 _read_csv_checked(path, SHORTLIST_REQUIRED, allow_empty=True)
                 checked += 1
         for suffix in ("weekly", "monthly"):
-            path = output_dir / f"cpr_{suffix}_{date}.csv"
+            path = resolve_scan_csv(suffix, date, output_dir)
             if path.exists():
                 _read_csv_checked(path, HTF_REQUIRED, allow_empty=True)
                 checked += 1

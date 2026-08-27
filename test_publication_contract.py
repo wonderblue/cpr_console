@@ -14,6 +14,7 @@ from publication_contract import (
     validate_site_dir,
     write_manifest,
 )
+from nse_cpr_scanner import scan_csv_path
 
 
 REQUIRED = {
@@ -36,10 +37,11 @@ REQUIRED = {
 
 class TestPublicationContract(unittest.TestCase):
     def _write_daily(self, output: Path, date: str = "20260813") -> None:
-        output.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(REQUIRED).to_csv(output / f"cpr_full_{date}.csv", index=False)
+        path = scan_csv_path("full", date, output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(REQUIRED).to_csv(path, index=False)
         pd.DataFrame({"SYMBOL": ["AAA"], "CLOSE": [106.0], "CPR_Width_Pct": [0.629]}).to_csv(
-            output / f"cpr_narrow_{date}.csv", index=False
+            scan_csv_path("narrow", date, output), index=False
         )
 
     def test_manifest_round_trip_and_known_freshness(self):
@@ -63,8 +65,8 @@ class TestPublicationContract(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             output = Path(tmp)
             self._write_daily(output)
-            frame = pd.read_csv(output / "cpr_full_20260813.csv").drop(columns=["CPR_Class"])
-            frame.to_csv(output / "cpr_full_20260813.csv", index=False)
+            frame = pd.read_csv(scan_csv_path("full", "20260813", output)).drop(columns=["CPR_Class"])
+            frame.to_csv(scan_csv_path("full", "20260813", output), index=False)
             with self.assertRaises(PublicationContractError):
                 validate_output_dir(output)
 

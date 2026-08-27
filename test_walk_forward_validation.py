@@ -11,6 +11,7 @@ from walk_forward_validation import (
     summarize_details,
     write_report,
 )
+from nse_cpr_scanner import scan_csv_path
 
 
 BASE_COLUMNS = [
@@ -52,7 +53,9 @@ class TestWalkForwardValidation(unittest.TestCase):
                 "Strategy_Explanation": "consolidation",
             },
         ]
-        pd.DataFrame(rows, columns=BASE_COLUMNS).to_csv(root / f"cpr_full_{date}.csv", index=False)
+        path = scan_csv_path("full", date, root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows, columns=BASE_COLUMNS).to_csv(path, index=False)
 
     def test_directional_and_wide_outcomes_use_next_completed_close(self):
         with tempfile.TemporaryDirectory() as tmp:

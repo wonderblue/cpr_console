@@ -53,7 +53,9 @@ def _sanitize_json(value: Any) -> Any:
 
 
 def _read_session(output_dir: Path, date: str) -> pd.DataFrame:
-    path = output_dir / f"cpr_full_{date}.csv"
+    from nse_cpr_scanner import resolve_scan_csv
+
+    path = resolve_scan_csv("full", date, output_dir)
     if not path.exists():
         raise FileNotFoundError(path)
     frame = pd.read_csv(path)

@@ -16,6 +16,7 @@ from nse_cpr_scanner import (
     keep_listed_equity,
     load_scan_result,
     normalize_bhavcopy,
+    scan_csv_path,
     split_shortlists,
     tag_fo_symbols,
 )
@@ -130,8 +131,8 @@ class TestExport(unittest.TestCase):
         self.assertTrue((narrow["CPR_Class"] == "Narrow").all() or narrow.empty)
         with TemporaryDirectory() as tmp:
             result = export_results(cash, "20260813", output_dir=Path(tmp))
-            self.assertTrue((Path(tmp) / "cpr_full_20260813.csv").exists())
-            self.assertTrue((Path(tmp) / "cpr_best_20260813.csv").exists())
+            self.assertTrue(scan_csv_path("full", "20260813", Path(tmp)).exists())
+            self.assertTrue(scan_csv_path("best", "20260813", Path(tmp)).exists())
             self.assertEqual(result.date, "20260813")
             self.assertFalse(result.top20.empty)
 
@@ -179,8 +180,8 @@ class TestExport(unittest.TestCase):
                 seed_bhavcopy_cache(cash, s, output_dir=out)
                 export_results(cash, s, output_dir=out, verbose=False)
             backfill_htf_scans(sessions[-1], output_dir=out, lookback=130)
-            self.assertTrue((out / f"cpr_weekly_{sessions[-1]}.csv").exists())
-            self.assertTrue((out / f"cpr_monthly_{sessions[-1]}.csv").exists())
+            self.assertTrue(scan_csv_path("weekly", sessions[-1], out).exists())
+            self.assertTrue(scan_csv_path("monthly", sessions[-1], out).exists())
 
 
 class TestEquityAndIndustry(unittest.TestCase):

@@ -47,6 +47,31 @@ from signal_contract import setup_score
 OUTPUT_DIR = Path("cpr_output")
 IST = ZoneInfo("Asia/Kolkata")
 
+
+def session_dir(date: str, output_dir: Optional[Path] = None) -> Path:
+    """Return cpr_output/YYYY/MM for a YYYYMMDD session date."""
+    root = Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    if len(date) != 8 or not date.isdigit():
+        raise ValueError(f"Session date must be YYYYMMDD, got {date!r}")
+    return root / date[:4] / date[4:6]
+
+
+def scan_csv_path(kind: str, date: str, output_dir: Optional[Path] = None) -> Path:
+    """Canonical path for a scan CSV: cpr_output/YYYY/MM/cpr_{kind}_{date}.csv."""
+    return session_dir(date, output_dir) / f"cpr_{kind}_{date}.csv"
+
+
+def resolve_scan_csv(kind: str, date: str, output_dir: Optional[Path] = None) -> Path:
+    """Prefer nested YYYY/MM path; fall back to legacy flat cpr_output/ layout."""
+    nested = scan_csv_path(kind, date, output_dir)
+    if nested.exists():
+        return nested
+    root = Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    flat = root / f"cpr_{kind}_{date}.csv"
+    if flat.exists():
+        return flat
+    return nested
+
 CASH_URL = "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{date}_F_0000.csv.zip"
 FO_URL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{date}_F_0000.csv.zip"
 
@@ -442,7 +467,7 @@ def backfill_cached_scans(
     industry = load_industry_map(fetch=False)
     written: List[str] = []
     for date in dates:
-        full_path = output_dir / f"cpr_full_{date}.csv"
+        full_path = resolve_scan_csv("full", date, output_dir)
         if full_path.exists():
             header = set(pd.read_csv(full_path, nrows=0).columns)
             if skip_existing and "Setup" in header and "Overlay" in header:
@@ -489,14 +514,14 @@ def backfill_htf_scans(
     monthly_bars = aggregate_htf_bars(panel, "M")
     written: List[str] = []
     for date in dates:
-        full_path = output_dir / f"cpr_full_{date}.csv"
+        full_path = resolve_scan_csv("full", date, output_dir)
         if not full_path.exists():
             continue
         for freq, bars, min_hist, suffix in (
             ("W-FRI", weekly_bars, MIN_HISTORY_WEEKS, "weekly"),
             ("M", monthly_bars, MIN_HISTORY_MONTHS, "monthly"),
         ):
-            out_path = output_dir / f"cpr_{suffix}_{date}.csv"
+            out_path = resolve_scan_csv(suffix, date, output_dir)
             if out_path.exists() and out_path.stat().st_size:
                 continue
             if bars.empty:
@@ -513,8 +538,9 @@ def backfill_htf_scans(
                 continue
             frame["Applies"] = htf_applies_label(str(latest), freq)
             frame["Timeframe"] = "Weekly" if freq.startswith("W") else "Monthly"
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             frame.to_csv(out_path, index=False)
-            written.append(out_path.stem.split("_")[-2] + f"_{suffix}")
+            written.append(f"{date}_{suffix}")
     if written:
         print(f"HTF archive: wrote {len(written)} week/month CSVs")
     return written
@@ -889,12 +915,13 @@ def attach_htf_to_result(result: ScanResult, output_dir: Optional[Path] = None, 
         result.weekly_applies = w_label
         result.monthly_applies = m_label
     if write_csv:
-        output_dir.mkdir(exist_ok=True)
+        day_dir = session_dir(result.date, output_dir)
+        day_dir.mkdir(parents=True, exist_ok=True)
         if not weekly.empty:
-            weekly.to_csv(output_dir / f"cpr_weekly_{result.date}.csv", index=False)
+            weekly.to_csv(scan_csv_path("weekly", result.date, output_dir), index=False)
             print(f"✓ Weekly CPR ({w_label}): {len(weekly)} names")
         if not monthly.empty:
-            monthly.to_csv(output_dir / f"cpr_monthly_{result.date}.csv", index=False)
+            monthly.to_csv(scan_csv_path("monthly", result.date, output_dir), index=False)
             print(f"✓ Monthly CPR ({m_label}): {len(monthly)} names")
     w_setups = int(weekly["Setup"].isin(["Long", "Short", "Watch"]).sum()) if not weekly.empty and "Setup" in weekly.columns else 0
     m_setups = int(monthly["Setup"].isin(["Long", "Short", "Watch"]).sum()) if not monthly.empty and "Setup" in monthly.columns else 0
@@ -1110,11 +1137,18 @@ def candidate_session_dates(now: Optional[datetime] = None, max_back: int = 7) -
 
 def discover_scan_dates(output_dir: Optional[Path] = None) -> List[str]:
     output_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR
-    dates = sorted(
-        {p.stem.split("_")[-1] for p in output_dir.glob("cpr_full_*.csv") if p.stem.split("_")[-1].isdigit()},
-        reverse=True,
-    )
-    return dates
+    nested = {
+        p.stem.split("_")[-1]
+        for p in output_dir.rglob("cpr_full_*.csv")
+        if p.stem.split("_")[-1].isdigit() and "bhavcopy" not in p.parts
+    }
+    # Legacy flat layout support during migration.
+    flat = {
+        p.stem.split("_")[-1]
+        for p in output_dir.glob("cpr_full_*.csv")
+        if p.stem.split("_")[-1].isdigit()
+    }
+    return sorted(nested | flat, reverse=True)
 
 
 def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Optional[str] = None) -> ScanResult:
@@ -1124,7 +1158,7 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
     (e.g. from discover_scan_dates) so large archives do not re-glob per date.
     """
     output_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR
-    full_path = output_dir / f"cpr_full_{date}.csv"
+    full_path = resolve_scan_csv("full", date, output_dir)
     if not full_path.exists():
         raise FileNotFoundError(f"Missing {full_path}")
     full = pd.read_csv(full_path)
@@ -1149,15 +1183,15 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         full = attach_wide_strategy(full)
     _, narrow, bullish, bearish, top20 = split_shortlists(full)
     bullish_bias = full[full["Bias"] == "Bullish"].copy() if "Bias" in full.columns else pd.DataFrame()
-    bullish_bias_path = output_dir / f"cpr_bullish_bias_{date}.csv"
+    bullish_bias_path = resolve_scan_csv("bullish_bias", date, output_dir)
     if bullish_bias_path.exists():
         bullish_bias = pd.read_csv(bullish_bias_path)
     fo_available = "Segment" in full.columns and bool((full["Segment"] == "F&O + Cash").any())
     best = pd.DataFrame()
     watchlist = pd.DataFrame()
     wide = pd.DataFrame()
-    best_path = output_dir / f"cpr_best_{date}.csv"
-    watch_path = output_dir / f"cpr_watchlist_{date}.csv"
+    best_path = resolve_scan_csv("best", date, output_dir)
+    watch_path = resolve_scan_csv("watchlist", date, output_dir)
     if best_path.exists():
         best = pd.read_csv(best_path)
     if best.empty or not set(SCORE_FIELDS).issubset(best.columns):
@@ -1166,7 +1200,7 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         watchlist = pd.read_csv(watch_path)
     if watchlist.empty or not set(SCORE_FIELDS).issubset(watchlist.columns):
         watchlist = compute_watchlist(full)
-    wide_path = output_dir / f"cpr_wide_{date}.csv"
+    wide_path = resolve_scan_csv("wide", date, output_dir)
     if wide_path.exists():
         wide = pd.read_csv(wide_path)
     if wide.empty or not set(WIDE_FIELDS).issubset(wide.columns):
@@ -1186,8 +1220,8 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         wide=wide,
         bullish_bias=bullish_bias,
     )
-    weekly_path = output_dir / f"cpr_weekly_{date}.csv"
-    monthly_path = output_dir / f"cpr_monthly_{date}.csv"
+    weekly_path = resolve_scan_csv("weekly", date, output_dir)
+    monthly_path = resolve_scan_csv("monthly", date, output_dir)
     if weekly_path.exists():
         result.weekly = pd.read_csv(weekly_path)
         if "Applies" in result.weekly.columns and not result.weekly.empty:
@@ -1200,7 +1234,7 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
     if previous and isinstance(previous, list):
         previous = previous[0] if previous else None
     if previous:
-        prev_path = output_dir / f"cpr_full_{previous}.csv"
+        prev_path = resolve_scan_csv("full", previous, output_dir)
         if prev_path.exists() and "Setup" in result.full.columns:
             prev_full = pd.read_csv(prev_path)
             try:
@@ -1434,7 +1468,8 @@ def export_results(
 ) -> ScanResult:
     """Export ranked tables and shortlists."""
     output_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR
-    output_dir.mkdir(exist_ok=True)
+    day_dir = session_dir(date, output_dir)
+    day_dir.mkdir(parents=True, exist_ok=True)
     # Compute after the current-session and higher-timeframe fields available to
     # this export path are attached. Existing setup/filter membership is unchanged.
     df = attach_confirmation_score(df)
@@ -1442,31 +1477,42 @@ def export_results(
     full_table, narrow, bullish, bearish, top20 = split_shortlists(df)
     bullish_bias = bullish_bias_view(df)
 
-    full_table.to_csv(output_dir / f"cpr_full_{date}.csv", index=False)
-    narrow.to_csv(output_dir / f"cpr_narrow_{date}.csv", index=False)
-    bullish.to_csv(output_dir / f"cpr_bullish_{date}.csv", index=False)
-    bullish_bias.to_csv(output_dir / f"cpr_bullish_bias_{date}.csv", index=False)
-    bearish.to_csv(output_dir / f"cpr_bearish_{date}.csv", index=False)
-    top20.to_csv(output_dir / f"cpr_top20_narrow_{date}.csv", index=False)
+    paths = {
+        "full": scan_csv_path("full", date, output_dir),
+        "narrow": scan_csv_path("narrow", date, output_dir),
+        "bullish": scan_csv_path("bullish", date, output_dir),
+        "bullish_bias": scan_csv_path("bullish_bias", date, output_dir),
+        "bearish": scan_csv_path("bearish", date, output_dir),
+        "top20_narrow": scan_csv_path("top20_narrow", date, output_dir),
+        "best": scan_csv_path("best", date, output_dir),
+    }
+    full_table.to_csv(paths["full"], index=False)
+    narrow.to_csv(paths["narrow"], index=False)
+    bullish.to_csv(paths["bullish"], index=False)
+    bullish_bias.to_csv(paths["bullish_bias"], index=False)
+    bearish.to_csv(paths["bearish"], index=False)
+    top20.to_csv(paths["top20_narrow"], index=False)
     best = compute_best(df)
-    best.to_csv(output_dir / f"cpr_best_{date}.csv", index=False)
+    best.to_csv(paths["best"], index=False)
     watchlist = compute_watchlist(df)
+    watch_path = scan_csv_path("watchlist", date, output_dir)
     if not watchlist.empty:
-        watchlist.to_csv(output_dir / f"cpr_watchlist_{date}.csv", index=False)
+        watchlist.to_csv(watch_path, index=False)
     wide = wide_table(df)
+    wide_path = scan_csv_path("wide", date, output_dir)
     if not wide.empty:
-        wide.to_csv(output_dir / f"cpr_wide_{date}.csv", index=False)
+        wide.to_csv(wide_path, index=False)
     if verbose:
-        print(f"✓ Full table: {output_dir / f'cpr_full_{date}.csv'}")
-        print(f"✓ Narrow CPR: {len(narrow)} symbols → {output_dir / f'cpr_narrow_{date}.csv'}")
-        print(f"✓ Bullish CPR: {len(bullish)} symbols → {output_dir / f'cpr_bullish_{date}.csv'}")
-        print(f"✓ Bullish Bias: {len(bullish_bias)} symbols → {output_dir / f'cpr_bullish_bias_{date}.csv'}")
-        print(f"✓ Bearish CPR: {len(bearish)} symbols → {output_dir / f'cpr_bearish_{date}.csv'}")
-        print(f"✓ Top 20 Narrow: {output_dir / f'cpr_top20_narrow_{date}.csv'}")
-        print(f"✓ Best today: {len(best)} symbols → {output_dir / f'cpr_best_{date}.csv'}")
+        print(f"✓ Full table: {paths['full']}")
+        print(f"✓ Narrow CPR: {len(narrow)} symbols → {paths['narrow']}")
+        print(f"✓ Bullish CPR: {len(bullish)} symbols → {paths['bullish']}")
+        print(f"✓ Bullish Bias: {len(bullish_bias)} symbols → {paths['bullish_bias']}")
+        print(f"✓ Bearish CPR: {len(bearish)} symbols → {paths['bearish']}")
+        print(f"✓ Top 20 Narrow: {paths['top20_narrow']}")
+        print(f"✓ Best today: {len(best)} symbols → {paths['best']}")
         if not watchlist.empty:
-            print(f"✓ Watchlist: {len(watchlist)} symbols → {output_dir / f'cpr_watchlist_{date}.csv'}")
-        print(f"✓ Wide CPR: {len(wide)} symbols → {output_dir / f'cpr_wide_{date}.csv'}")
+            print(f"✓ Watchlist: {len(watchlist)} symbols → {watch_path}")
+        print(f"✓ Wide CPR: {len(wide)} symbols → {wide_path}")
 
     return ScanResult(
         date=date,

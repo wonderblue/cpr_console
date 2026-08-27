@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from nse_cpr_scanner import bullish_bias_view, export_results, load_scan_result, split_shortlists
+from nse_cpr_scanner import bullish_bias_view, export_results, load_scan_result, scan_csv_path, split_shortlists
 
 
 class TestBullishViews(unittest.TestCase):
@@ -44,8 +44,8 @@ class TestBullishViews(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp)
             export_results(frame, "20260826", output_dir=output, verbose=False)
-            bias_path = output / "cpr_bullish_bias_20260826.csv"
-            strict_path = output / "cpr_bullish_20260826.csv"
+            bias_path = scan_csv_path("bullish_bias", "20260826", output)
+            strict_path = scan_csv_path("bullish", "20260826", output)
             self.assertTrue(bias_path.exists())
             self.assertTrue(strict_path.exists())
             self.assertEqual(
