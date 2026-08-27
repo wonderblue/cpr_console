@@ -15,7 +15,7 @@ from nse_cpr_scanner import scan_csv_path
 
 
 BASE_COLUMNS = [
-    "SYMBOL", "CLOSE", "CPR_Top", "CPR_Bottom", "CPR_Class", "Setup",
+    "SYMBOL", "CLOSE", "TC", "BC", "CPR_Top", "CPR_Bottom", "CPR_Class", "Setup",
     "Signal_Direction", "Signal_Score", "Signal_Grade", "Strategy_Type",
     "Strategy_Setup", "Strategy_Confirmation", "Strategy_Explanation",
 ]
@@ -25,28 +25,32 @@ class TestWalkForwardValidation(unittest.TestCase):
     def _write_session(self, root: Path, date: str, closes: dict[str, float]) -> None:
         rows = [
             {
-                "SYMBOL": "AAA", "CLOSE": closes["AAA"], "CPR_Top": 105.0, "CPR_Bottom": 95.0,
+                "SYMBOL": "AAA", "CLOSE": closes["AAA"], "TC": 105.0, "BC": 95.0,
+                "CPR_Top": 105.0, "CPR_Bottom": 95.0,
                 "CPR_Class": "Narrow", "Setup": "Long", "Signal_Direction": "Long",
                 "Signal_Score": 80, "Signal_Grade": "A", "Strategy_Type": "Narrow CPR",
                 "Strategy_Setup": "Not applicable", "Strategy_Confirmation": "Not applicable",
                 "Strategy_Explanation": "legacy narrow",
             },
             {
-                "SYMBOL": "BBB", "CLOSE": closes["BBB"], "CPR_Top": 205.0, "CPR_Bottom": 195.0,
+                "SYMBOL": "BBB", "CLOSE": closes["BBB"], "TC": 195.0, "BC": 205.0,
+                "CPR_Top": 205.0, "CPR_Bottom": 195.0,
                 "CPR_Class": "Narrow", "Setup": "Short", "Signal_Direction": "Short",
                 "Signal_Score": 70, "Signal_Grade": "B", "Strategy_Type": "Narrow CPR",
                 "Strategy_Setup": "Not applicable", "Strategy_Confirmation": "Not applicable",
                 "Strategy_Explanation": "legacy narrow",
             },
             {
-                "SYMBOL": "CCC", "CLOSE": closes["CCC"], "CPR_Top": 305.0, "CPR_Bottom": 295.0,
+                "SYMBOL": "CCC", "CLOSE": closes["CCC"], "TC": 305.0, "BC": 295.0,
+                "CPR_Top": 305.0, "CPR_Bottom": 295.0,
                 "CPR_Class": "Wide", "Setup": "No setup", "Signal_Direction": "Long",
                 "Signal_Score": 75, "Signal_Grade": "B", "Strategy_Type": "Wide CPR",
                 "Strategy_Setup": "Wide Upside Breakout", "Strategy_Confirmation": "Confirmed",
                 "Strategy_Explanation": "confirmed wide",
             },
             {
-                "SYMBOL": "DDD", "CLOSE": closes["DDD"], "CPR_Top": 405.0, "CPR_Bottom": 395.0,
+                "SYMBOL": "DDD", "CLOSE": closes["DDD"], "TC": 395.0, "BC": 405.0,
+                "CPR_Top": 405.0, "CPR_Bottom": 395.0,
                 "CPR_Class": "Wide", "Setup": "No setup", "Signal_Direction": "Neutral",
                 "Signal_Score": 50, "Signal_Grade": "C", "Strategy_Type": "Wide CPR",
                 "Strategy_Setup": "Wide Consolidation", "Strategy_Confirmation": "Watch",
@@ -71,6 +75,15 @@ class TestWalkForwardValidation(unittest.TestCase):
             self.assertEqual(outcomes["DDD"], "Not directional")
             self.assertEqual(cohorts["AAA"], "Long")
             self.assertEqual(cohorts["CCC"], "Wide Confirmed Upside")
+
+    def test_bearish_geometry_uses_ordered_cpr_bounds_not_tc_bc_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_session(root, "20260813", {"AAA": 100, "BBB": 200, "CCC": 300, "DDD": 400})
+            self._write_session(root, "20260814", {"AAA": 100, "BBB": 190, "CCC": 300, "DDD": 390})
+            details = build_walk_forward_details(root)
+            outcomes = dict(zip(details["SYMBOL"], details["Outcome"]))
+            self.assertEqual(outcomes["BBB"], "Followed")
 
     def test_validator_never_uses_unpaired_final_session_as_signal(self):
         with tempfile.TemporaryDirectory() as tmp:

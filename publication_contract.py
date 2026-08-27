@@ -16,6 +16,9 @@ import pandas as pd
 
 MANIFEST_NAME = "publication_manifest.json"
 SCHEMA_VERSION = 1
+DEFAULT_MIN_FULL_ROWS = 1500
+DEFAULT_MAX_ROW_DROP_PCT = 0.35
+DEFAULT_MAX_SITE_BYTES = 500_000_000
 DATE_RE = re.compile(r"^(?:cpr_[a-z0-9]+|cm)_(\d{8})\.csv$")
 
 DAILY_REQUIRED = {
@@ -77,7 +80,12 @@ def _read_csv_checked(path: Path, required: set[str], allow_empty: bool = True) 
     return frame
 
 
-def validate_output_dir(output_dir: Path, expected_date: Optional[str] = None) -> dict:
+def validate_output_dir(
+    output_dir: Path,
+    expected_date: Optional[str] = None,
+    min_full_rows: int = 1,
+    max_row_drop_pct: Optional[float] = None,
+) -> dict:
     """Validate every generated daily/HTF CSV before site publication."""
     output_dir = Path(output_dir)
     dates = _scan_dates(output_dir)
@@ -95,6 +103,10 @@ def validate_output_dir(output_dir: Path, expected_date: Optional[str] = None) -
     for date in dates:
         full = _read_csv_checked(resolve_scan_csv("full", date, output_dir), DAILY_REQUIRED, allow_empty=False)
         row_counts[date] = int(len(full))
+        if len(full) < min_full_rows:
+            raise PublicationContractError(
+                f"Suspiciously small full scan for {date}: {len(full)} rows; minimum is {min_full_rows}"
+            )
         checked += 1
         for suffix in ("narrow", "bullish", "bearish", "top20_narrow", "best", "watchlist"):
             path = resolve_scan_csv(suffix, date, output_dir)
@@ -106,6 +118,22 @@ def validate_output_dir(output_dir: Path, expected_date: Optional[str] = None) -
             if path.exists():
                 _read_csv_checked(path, HTF_REQUIRED, allow_empty=True)
                 checked += 1
+
+    if max_row_drop_pct is not None:
+        if not 0 <= max_row_drop_pct < 1:
+            raise ValueError("max_row_drop_pct must be between 0 and 1")
+        chronological = sorted(row_counts)
+        for previous_date, current_date in zip(chronological, chronological[1:]):
+            previous_rows = row_counts[previous_date]
+            current_rows = row_counts[current_date]
+            minimum = previous_rows * (1 - max_row_drop_pct)
+            if current_rows < minimum:
+                drop_pct = 1 - (current_rows / previous_rows)
+                raise PublicationContractError(
+                    f"Suspicious row-count drop {previous_date} → {current_date}: "
+                    f"{previous_rows} → {current_rows} ({drop_pct:.1%}); "
+                    f"maximum allowed is {max_row_drop_pct:.1%}"
+                )
 
     return {
         "latest_date": dates[0],
@@ -231,7 +259,12 @@ def validate_manifest(
         )
 
 
-def validate_site_dir(site_dir: Path, expected_date: Optional[str] = None) -> None:
+def validate_site_dir(
+    site_dir: Path,
+    expected_date: Optional[str] = None,
+    max_site_bytes: Optional[int] = None,
+    max_sessions: Optional[int] = None,
+) -> None:
     site_dir = Path(site_dir)
     missing = [str(site_dir / item) for item in SITE_REQUIRED if not (site_dir / item).is_file()]
     if missing:
@@ -262,6 +295,16 @@ def validate_site_dir(site_dir: Path, expected_date: Optional[str] = None) -> No
         raise PublicationContractError(f"Invalid site archive.json: {exc}") from exc
     if not isinstance(archive, list) or not archive:
         raise PublicationContractError("site/archive.json must contain at least one session date")
+    if max_sessions is not None and len(archive) > max_sessions:
+        raise PublicationContractError(
+            f"Generated site has {len(archive)} sessions; maximum is {max_sessions}"
+        )
+    if max_site_bytes is not None:
+        size = sum(path.stat().st_size for path in site_dir.rglob("*") if path.is_file())
+        if size > max_site_bytes:
+            raise PublicationContractError(
+                f"Generated site is too large: {size:,} bytes; maximum is {max_site_bytes:,}"
+            )
 
 
 def atomic_publish_dir(staging_dir: Path, destination_dir: Path) -> None:
@@ -296,15 +339,28 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--output-dir", default="cpr_output")
     parser.add_argument("--site-dir", default="site")
     parser.add_argument("--require-known", action="store_true")
+    parser.add_argument("--min-full-rows", type=int, default=DEFAULT_MIN_FULL_ROWS)
+    parser.add_argument("--max-row-drop-pct", type=float, default=DEFAULT_MAX_ROW_DROP_PCT)
+    parser.add_argument("--max-site-bytes", type=int, default=DEFAULT_MAX_SITE_BYTES)
+    parser.add_argument("--max-sessions", type=int, default=60)
     args = parser.parse_args(argv)
 
     output_dir = Path(args.output_dir)
-    output = validate_output_dir(output_dir)
+    output = validate_output_dir(
+        output_dir,
+        min_full_rows=args.min_full_rows,
+        max_row_drop_pct=args.max_row_drop_pct,
+    )
     manifest = read_manifest(output_dir)
     if manifest is None:
         raise PublicationContractError(f"Missing {output_dir / MANIFEST_NAME}")
     validate_manifest(manifest, output["dates"], require_known=args.require_known)
-    validate_site_dir(Path(args.site_dir), expected_date=output["latest_date"])
+    validate_site_dir(
+        Path(args.site_dir),
+        expected_date=output["latest_date"],
+        max_site_bytes=args.max_site_bytes if args.max_site_bytes > 0 else None,
+        max_sessions=args.max_sessions if args.max_sessions > 0 else None,
+    )
     print(
         f"Publication contract OK: latest={output['latest_date']} "
         f"files_checked={output['files_checked']}"

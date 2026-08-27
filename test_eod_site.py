@@ -17,6 +17,7 @@ from nse_cpr_scanner import (
     last_completed_session,
     load_scan_result,
     normalize_bhavcopy,
+    scan_csv_path,
     tag_fo_symbols,
 )
 
@@ -64,6 +65,7 @@ class TestSiteBuild(unittest.TestCase):
             self.assertTrue((site / "downloads" / "cpr_20260813.zip").exists())
             self.assertTrue((site / "archive" / "20260813" / "index.html").exists())
             self.assertTrue((site / "archive" / "20260813" / "payload.json").exists())
+            self.assertFalse((site / "archive" / "20260813" / "downloads").exists())
             html = (site / "index.html").read_text(encoding="utf-8")
             self.assertNotIn("window.CPR_DATA", html)
             self.assertIn("window.CPR_PAYLOAD_URL", html)
@@ -79,7 +81,7 @@ class TestSiteBuild(unittest.TestCase):
             self.assertIn("Bullish CPR", html)
             self.assertIn("Bullish Bias", html)
             self.assertIn('data-tab="bullish_bias"', html)
-            self.assertIn('app.js?v=8', html)
+            self.assertIn('app.js?v=9', html)
             self.assertIn("Strategy_Type", payload["tables"]["full"][0])
             self.assertIn("Strategy_Explanation", payload["tables"]["full"][0])
             self.assertIn("wide", payload["tables"])
@@ -100,10 +102,13 @@ class TestSiteBuild(unittest.TestCase):
             self.assertIn(".badge.confirmed", css)
             self.assertIn('data-tab="mylist"', html)
             self.assertIn('id="saveViewButton"', html)
+            self.assertIn('id="savedViewsButton"', html)
             self.assertIn('id="manageAlertsButton"', html)
             self.assertIn('id="alertCenterButton"', html)
             self.assertIn("localStorage", app_js)
             self.assertIn("currentAlerts", app_js)
+            self.assertIn("addAlertRuleFromForm", app_js)
+            self.assertNotIn("window.prompt", app_js)
             self.assertIn("drawerWatchButton", app_js)
             self.assertIn("cpr_20260813.zip", payload["downloads"]["zip"])
             self.assertTrue((site / "downloads" / "cpr_wide.csv").exists())
@@ -112,8 +117,33 @@ class TestSiteBuild(unittest.TestCase):
             self.assertIn("id=\"industry\"", html)
             self.assertIn("Unclassified", html)
             self.assertIn('id="dataStatus"', html)
+            self.assertIn('role="tablist"', html)
+            self.assertIn('aria-selected="true"', html)
+            self.assertIn('id="columnMode"', html)
+            self.assertIn('id="emptyGuide"', html)
+            self.assertIn("COMPACT_COLS", app_js)
+            self.assertIn("Open Watchlist", app_js)
+            self.assertIn('preserveAspectRatio="xMidYMid meet"', app_js)
+            self.assertIn("saveCurrentView($(\"viewName\").value)", app_js)
             self.assertIn("data session", (site / "assets" / "app.js").read_text(encoding="utf-8"))
             self.assertTrue((site / "publication_manifest.json").exists())
+
+    def test_build_caps_published_sessions_without_pruning_source_archive(self):
+        cash = normalize_bhavcopy(_sample_cash(), cash_only=True)
+        cash = tag_fo_symbols(cash, pd.DataFrame({"SYMBOL": ["AAA"]}))
+        cash = apply_bullish_cpr_filters(compute_cpr(cash))
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            site = Path(tmp) / "site"
+            for date in ("20260811", "20260812", "20260813"):
+                export_results(cash, date, output_dir=out, verbose=False)
+
+            dates = build_site(out, site, max_sessions=2)
+
+            self.assertEqual(dates, ["20260813", "20260812"])
+            self.assertEqual(json.loads((site / "archive.json").read_text()), dates)
+            self.assertFalse((site / "archive" / "20260811").exists())
+            self.assertTrue(scan_csv_path("full", "20260811", out).exists())
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: eod-cpr-pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -32,6 +32,8 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -51,11 +53,11 @@ jobs:
           SITE_ONLY: ${{ inputs.site_only }}
         run: |
           if [ "${SITE_ONLY}" = "true" ]; then
-            python eod_publish.py --site-only
+            python eod_publish.py --site-only --max-sessions 60
           elif [ -n "${SCAN_DATE}" ]; then
-            python eod_publish.py "${SCAN_DATE}"
+            python eod_publish.py "${SCAN_DATE}" --max-sessions 60
           else
-            python eod_publish.py
+            python eod_publish.py --max-sessions 60
           fi
 
       - name: Validate publication contract
@@ -88,7 +90,8 @@ jobs:
             echo "No new CSVs"
           else
             git commit -m "EOD CPR scan $(date -u +%Y%m%d)"
-            git push
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
           fi
 
       - uses: actions/upload-pages-artifact@v3

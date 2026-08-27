@@ -36,10 +36,12 @@ REQUIRED = {
 
 
 class TestPublicationContract(unittest.TestCase):
-    def _write_daily(self, output: Path, date: str = "20260813") -> None:
+    def _write_daily(self, output: Path, date: str = "20260813", rows: int = 1) -> None:
         path = scan_csv_path("full", date, output)
         path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(REQUIRED).to_csv(path, index=False)
+        full = pd.concat([pd.DataFrame(REQUIRED)] * rows, ignore_index=True)
+        full["SYMBOL"] = [f"AAA{i}" for i in range(rows)]
+        full.to_csv(path, index=False)
         pd.DataFrame({"SYMBOL": ["AAA"], "CLOSE": [106.0], "CPR_Width_Pct": [0.629]}).to_csv(
             scan_csv_path("narrow", date, output), index=False
         )
@@ -69,6 +71,21 @@ class TestPublicationContract(unittest.TestCase):
             frame.to_csv(scan_csv_path("full", "20260813", output), index=False)
             with self.assertRaises(PublicationContractError):
                 validate_output_dir(output)
+
+    def test_rejects_scan_below_configured_row_floor(self):
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            self._write_daily(output, rows=2)
+            with self.assertRaisesRegex(PublicationContractError, "Suspiciously small"):
+                validate_output_dir(output, min_full_rows=3)
+
+    def test_rejects_sharp_row_count_drop(self):
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            self._write_daily(output, "20260812", rows=10)
+            self._write_daily(output, "20260813", rows=5)
+            with self.assertRaisesRegex(PublicationContractError, "row-count drop"):
+                validate_output_dir(output, max_row_drop_pct=0.35)
 
     def test_unknown_legacy_manifest_requires_explicit_nonfresh_mode(self):
         with TemporaryDirectory() as tmp:
@@ -111,6 +128,27 @@ class TestPublicationContract(unittest.TestCase):
             (site / "archive.json").write_text(json.dumps(["20260813"]), encoding="utf-8")
             with self.assertRaises(PublicationContractError):
                 validate_site_dir(site)
+
+    def test_site_contract_enforces_session_and_size_budgets(self):
+        with TemporaryDirectory() as tmp:
+            site = Path(tmp)
+            (site / "assets").mkdir()
+            (site / "index.html").write_text(
+                'window.CPR_PAYLOAD_URL = "payload.json"; 20260813', encoding="utf-8"
+            )
+            (site / "assets/style.css").write_text("", encoding="utf-8")
+            (site / "assets/app.js").write_text("", encoding="utf-8")
+            (site / "archive.json").write_text(
+                json.dumps(["20260813", "20260812"]), encoding="utf-8"
+            )
+            (site / "publication_manifest.json").write_text("{}", encoding="utf-8")
+            (site / "payload.json").write_text(
+                json.dumps({"date": "20260813", "tables": {}}), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(PublicationContractError, "maximum is 1"):
+                validate_site_dir(site, expected_date="20260813", max_sessions=1)
+            with self.assertRaisesRegex(PublicationContractError, "too large"):
+                validate_site_dir(site, max_site_bytes=1)
 
 
 if __name__ == "__main__":

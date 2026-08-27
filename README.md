@@ -41,6 +41,20 @@ A clean, practical Central Pivot Range (CPR) screening console for equities. Des
 
 ## 🚀 Quick Start
 
+### Application map
+
+The repository contains three independent CPR research tools. Their rules and
+time horizons are intentionally separate:
+
+| Tool | Command | Purpose |
+|------|---------|---------|
+| Shah live console | `streamlit run app.py --server.port 8501` | Live CPR geometry, virgin CPR, overlay and watchlist |
+| Intraday breakout | `streamlit run breakout_app.py --server.port 8502` | TC/BC breakout screening and short-horizon backtesting |
+| EOD scanner | `streamlit run eod_app.py --server.port 8503` | NSE bhavcopy scan whose daily levels apply to the next session |
+
+The generated EOD research site is published at
+<https://wonderblue.github.io/cpr_console/>.
+
 ### Prerequisites
 
 - Python 3.9+
@@ -55,7 +69,7 @@ A clean, practical Central Pivot Range (CPR) screening console for equities. Des
    pip install -r requirements.txt
    ```
 
-3. **Run the application**:
+3. **Run the Shah live application**:
    ```bash
    streamlit run app.py
    ```
@@ -71,6 +85,14 @@ cpr_console/
 ├── app.py                  # Main Streamlit dashboard
 ├── cpr_engine.py           # CPR calculation and screening logic
 ├── data_provider.py        # Data source adapter (Perplexity Finance / Mock)
+├── breakout_app.py         # Intraday TC/BC breakout screener
+├── cpr_breakout_engine.py  # Breakout and backtest logic
+├── eod_app.py              # Interactive NSE bhavcopy scanner
+├── nse_cpr_scanner.py      # EOD scan, history and higher-timeframe logic
+├── eod_site.py             # Static EOD research site generator
+├── eod_publish.py          # Validated atomic publication pipeline
+├── publication_contract.py # Data freshness, schema and size safeguards
+├── cpr_output/YYYY/MM/     # Committed EOD scan archive
 ├── requirements.txt        # Python dependencies
 ├── sample_symbols.csv      # Sample NSE symbols
 ├── test_cpr.py             # Unit tests
@@ -146,11 +168,30 @@ In the "Screening Filters" section:
 
 ## 🧪 Testing
 
-Run unit tests:
+Run the complete unit suite:
 
 ```bash
-python test_cpr.py
+python -m unittest discover -v
 ```
+
+CI uses the smaller dependency set in `requirements-ci.txt`.
+
+### EOD publication
+
+Rebuild the public-site artifact from committed scans:
+
+```bash
+python eod_publish.py --site-only --max-sessions 60
+```
+
+The Pages artifact intentionally contains only the latest 60 sessions. The
+complete source CSV archive remains under `cpr_output/YYYY/MM/`. Use
+`python eod_site.py --max-sessions 0` only for a local full-history build.
+
+Before publication, the pipeline validates required columns, source freshness,
+minimum universe size, abnormal row-count drops, archive depth and total site
+size. Daily CPR calculated from session D applies to session D+1; weekly and
+monthly views use completed periods.
 
 Expected output:
 ```
@@ -236,10 +277,10 @@ class MyBrokerDataProvider:
 
 ### Functionality
 
-- **No Real-Time Alerts**: Manual refresh required
-- **No Persistent Storage**: Results not saved between sessions
-- **No Chart Overlays**: CPR lines not drawn on charts (by design)
-- **No Backtesting**: Historical screening not implemented
+- **No server-side alerts**: EOD alert rules are evaluated in the browser against the loaded published session.
+- **Browser-local preferences**: EOD saved views and watchlists remain in that browser.
+- **Bounded public archive**: Pages carries 60 sessions; full scan CSV history remains in the repository.
+- **Backtest scope**: Intraday breakout history is constrained by Yahoo interval limits.
 
 ### Technical
 

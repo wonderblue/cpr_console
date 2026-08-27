@@ -103,8 +103,8 @@ def _outcome(direction: str | None, row: pd.Series, next_close: Any) -> str:
         return "Not directional"
     try:
         close = float(next_close)
-        top = float(row["TC"] if "TC" in row else row["CPR_Top"])
-        bottom = float(row["BC"] if "BC" in row else row["CPR_Bottom"])
+        top = float(row["CPR_Top"])
+        bottom = float(row["CPR_Bottom"])
     except (KeyError, TypeError, ValueError):
         return "No data"
     if pd.isna(close) or pd.isna(top) or pd.isna(bottom):

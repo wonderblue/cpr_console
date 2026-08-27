@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from eod_site import build_site
+from eod_site import DEFAULT_PUBLISHED_SESSIONS, build_site
 from nse_cpr_scanner import (
     OUTPUT_DIR,
     HISTORY_LOOKBACK_HTF,
@@ -17,6 +17,9 @@ from nse_cpr_scanner import (
     scan_eod_cpr,
 )
 from publication_contract import (
+    DEFAULT_MAX_ROW_DROP_PCT,
+    DEFAULT_MAX_SITE_BYTES,
+    DEFAULT_MIN_FULL_ROWS,
     PublicationContractError,
     atomic_publish_dir,
     build_manifest,
@@ -60,6 +63,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR))
     parser.add_argument("--site-dir", default="site")
     parser.add_argument(
+        "--max-sessions",
+        type=int,
+        default=DEFAULT_PUBLISHED_SESSIONS,
+        help="Recent sessions to publish to the static site; 0 publishes all",
+    )
+    parser.add_argument("--max-site-bytes", type=int, default=DEFAULT_MAX_SITE_BYTES)
+    parser.add_argument(
         "--lookback",
         type=int,
         default=HISTORY_LOOKBACK_HTF,
@@ -97,7 +107,11 @@ def main(argv: list[str] | None = None) -> None:
         )
         write_manifest(output_dir, manifest)
 
-    output_contract = validate_output_dir(output_dir)
+    output_contract = validate_output_dir(
+        output_dir,
+        min_full_rows=DEFAULT_MIN_FULL_ROWS,
+        max_row_drop_pct=DEFAULT_MAX_ROW_DROP_PCT,
+    )
     validate_manifest(
         manifest,
         output_contract["dates"],
@@ -108,8 +122,13 @@ def main(argv: list[str] | None = None) -> None:
     if staging.exists():
         shutil.rmtree(staging)
     try:
-        dates = build_site(output_dir, staging)
-        validate_site_dir(staging, expected_date=dates[0])
+        dates = build_site(output_dir, staging, max_sessions=args.max_sessions)
+        validate_site_dir(
+            staging,
+            expected_date=dates[0],
+            max_site_bytes=args.max_site_bytes,
+            max_sessions=args.max_sessions if args.max_sessions > 0 else None,
+        )
         atomic_publish_dir(staging, site_dir)
     except Exception as exc:
         if staging.exists():

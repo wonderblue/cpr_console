@@ -35,6 +35,7 @@ from nse_cpr_scanner import (
 from publication_contract import read_manifest
 
 SITE_DIR = Path("site")
+DEFAULT_PUBLISHED_SESSIONS = 60
 ROUND_2 = {
     "OPEN",
     "HIGH",
@@ -253,7 +254,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
   <meta name="data-session" content="{html.escape(payload["date"], quote=True)}"/>
   <title>EOD CPR · {html.escape(payload["label"])}</title>
   <base href="{asset_prefix}">
-  <link rel="stylesheet" href="assets/style.css?v=6"/>
+  <link rel="stylesheet" href="assets/style.css?v=7"/>
 </head>
 <body>
   <header class="top">
@@ -285,6 +286,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     </div>
     <div class="local-actions">
       <button id="saveViewButton" type="button">Save current view</button>
+      <button id="savedViewsButton" type="button">Saved views</button>
       <button id="manageAlertsButton" type="button">Alert rules</button>
       <button id="alertCenterButton" type="button">Alerts <span id="alertCount" class="tool-count">0</span></button>
     </div>
@@ -292,44 +294,70 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
   <section id="localPanel" class="local-panel" hidden aria-live="polite"></section>
 
   <section class="toolbar">
-    <input id="search" type="search" placeholder="Search symbol…" autocomplete="off"/>
-    <select id="segment"><option value="Any">Any segment</option><option>F&amp;O + Cash</option><option>Cash Only</option></select>
+    <label class="filter-label">Symbol
+      <input id="search" type="search" placeholder="Search symbol…" autocomplete="off"/>
+    </label>
+    <label class="filter-label">Segment
+      <select id="segment"><option value="Any">Any segment</option><option>F&amp;O + Cash</option><option>Cash Only</option></select>
+    </label>
     <label class="filter-label">Industry
       <select id="industry">{industry_opts}</select>
     </label>
-    <select id="klass"><option value="Any">Any CPR class</option><option>Narrow</option><option>Moderate</option><option>Wide</option></select>
-    <select id="bias"><option value="Any">Any bias</option><option>Bullish</option><option>Bearish</option><option>Neutral</option></select>
-    <select id="overlay"><option value="Any">Any overlay</option><option>Higher</option><option>Lower</option><option>Inside</option><option>Outside</option><option>Overlapping</option></select>
-    <select id="setup"><option value="Any">Any setup</option><option>Long</option><option>Short</option><option>Watch Long</option><option>Watch Short</option><option>Watch</option><option>No setup</option></select>
-    <select id="ownNarrow"><option value="Any">Own-narrow: any</option><option value="Yes">Own-narrow</option><option value="No">Not own-narrow</option></select>
+    <label class="filter-label">CPR class
+      <select id="klass"><option value="Any">Any CPR class</option><option>Narrow</option><option>Moderate</option><option>Wide</option></select>
+    </label>
+    <label class="filter-label">Bias
+      <select id="bias"><option value="Any">Any bias</option><option>Bullish</option><option>Bearish</option><option>Neutral</option></select>
+    </label>
+    <label class="filter-label">Overlay
+      <select id="overlay"><option value="Any">Any overlay</option><option>Higher</option><option>Lower</option><option>Inside</option><option>Outside</option><option>Overlapping</option></select>
+    </label>
+    <label class="filter-label">Setup
+      <select id="setup"><option value="Any">Any setup</option><option>Long</option><option>Short</option><option>Watch Long</option><option>Watch Short</option><option>Watch</option><option>No setup</option></select>
+    </label>
+    <label class="filter-label">Own-history width
+      <select id="ownNarrow"><option value="Any">Own-narrow: any</option><option value="Yes">Own-narrow</option><option value="No">Not own-narrow</option></select>
+    </label>
+    <label class="filter-label">Columns
+      <select id="columnMode"><option value="compact">Trader view</option><option value="research">Research view</option></select>
+    </label>
     <label class="filter-check"><input id="niftyOnly" type="checkbox"/> Nifty 500</label>
     <label class="filter-check"><input id="hideUnclassified" type="checkbox"/> Hide Unclassified</label>
   </section>
   <p class="count" style="padding-top:0">
-    CPR class is the band as % of close: Narrow ≤ 0.25%, Moderate 0.25–0.75%, Wide &gt; 0.75%.
+    CPR class is the band as % of close: Narrow ≤ 0.25%, Moderate 0.25–&lt;0.75%, Wide ≥ 0.75%.
     Own-narrow is that stock versus its own history (60 days, ~12 weeks, or completed months).
     Setups require a ≥ 0.2% close beyond the band plus a Higher/Lower overlay, and Long / Short are
     paused in a Risk-Off / Risk-On NIFTY regime. Daily Pivot / BC / TC are tomorrow’s levels.
     Use the Weekly / Monthly tabs to hold longer.
   </p>
 
-  <nav class="tabs" id="tabs">
-    <button data-tab="best" class="on">Best today</button>
-    <button data-tab="full">Full</button>
-    <button data-tab="narrow">Narrow</button>
-    <button data-tab="bullish">Bullish CPR</button>
-    <button data-tab="bullish_bias">Bullish Bias</button>
-    <button data-tab="bearish">Bearish</button>
-    <button data-tab="top20">Top 20</button>
-    <button data-tab="watchlist">Watchlist</button>
-    <button data-tab="mylist">My list <span id="myListCount" class="tab-count">0</span></button>
-    <button data-tab="wide">Wide CPR</button>
-    <button data-tab="follow">Follow-through</button>
-    <button data-tab="weekly">Weekly</button>
-    <button data-tab="monthly">Monthly</button>
+  <nav class="tabs" id="tabs" aria-label="Data views">
+    <div class="tab-group" role="tablist" aria-label="Daily views"><span>Daily</span>
+      <button role="tab" aria-selected="true" data-tab="best" class="on">Best</button>
+      <button role="tab" aria-selected="false" data-tab="watchlist">Watchlist</button>
+      <button role="tab" aria-selected="false" data-tab="bullish">Long geometry</button>
+      <button role="tab" aria-selected="false" data-tab="bearish">Short geometry</button>
+      <button role="tab" aria-selected="false" data-tab="narrow">Narrow</button>
+      <button role="tab" aria-selected="false" data-tab="wide">Wide</button>
+      <button role="tab" aria-selected="false" data-tab="full">All</button>
+    </div>
+    <div class="tab-group" role="tablist" aria-label="Higher timeframe views"><span>Higher timeframe</span>
+      <button role="tab" aria-selected="false" data-tab="weekly">Weekly</button>
+      <button role="tab" aria-selected="false" data-tab="monthly">Monthly</button>
+    </div>
+    <div class="tab-group" role="tablist" aria-label="Review views"><span>Review</span>
+      <button role="tab" aria-selected="false" data-tab="follow">Follow-through</button>
+      <button role="tab" aria-selected="false" data-tab="top20">Top 20</button>
+      <button role="tab" aria-selected="false" data-tab="bullish_bias">Bullish bias</button>
+    </div>
+    <div class="tab-group" role="tablist" aria-label="Personal views"><span>Personal</span>
+      <button role="tab" aria-selected="false" data-tab="mylist">My list <span id="myListCount" class="tab-count">0</span></button>
+    </div>
   </nav>
 
   <p class="count" id="count"></p>
+  <div class="empty-guide" id="emptyGuide" hidden></div>
   <div class="table-wrap">
     <table>
       <thead id="head"></thead>
@@ -366,7 +394,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     Bullish CPR is the strict narrow, above-band breakout shortlist; Bullish Bias includes all rows with bullish CPR geometry.
   </footer>
   <script>window.CPR_PAYLOAD_URL = "payload.json";</script>
-  <script src="assets/app.js?v=8"></script>
+  <script src="assets/app.js?v=9"></script>
 </body>
 </html>
 """
@@ -419,11 +447,19 @@ select, input { background: var(--card); color: var(--text); border: 1px solid v
 .local-panel .alert-match { color: var(--text); }
 .watch-star { color: var(--accent); font-weight: 700; margin-right: 4px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 24px 10px; }
-.toolbar input { min-width: 220px; flex: 1; }
-.tabs { display: flex; gap: 6px; padding: 0 24px; }
+.toolbar .filter-label { min-width: 135px; }
+.toolbar .filter-label:first-child { flex: 1; min-width: 220px; }
+.toolbar input, .toolbar select { width: 100%; }
+.tabs { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 0 24px; }
+.tab-group { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.tab-group > span { color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; margin-right: 2px; }
 .tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
 .tabs button.on { color: var(--bg); background: var(--text); border-color: var(--text); }
 .count { padding: 8px 24px; color: var(--muted); font-size: 13px; }
+.empty-guide { margin: 0 24px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
+.empty-guide button { margin-left: 8px; background: var(--accent); color: var(--bg); border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.form-grid label { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 5px; }
 .table-wrap { padding: 0 24px 40px; overflow: auto; max-height: 70vh; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { position: sticky; top: 0; background: #151b21; text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
@@ -471,6 +507,9 @@ footer { padding: 12px 24px 32px; color: var(--muted); font-size: 12px; border-t
   .symbol-drawer { width: 100vw; padding: 18px; }
   .local-tools { align-items: flex-start; flex-direction: column; margin-left: 18px; margin-right: 18px; }
   .local-actions { justify-content: flex-start; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 8px; }
+  .tab-group { flex: 0 0 auto; flex-wrap: nowrap; }
+  .form-grid { grid-template-columns: 1fr; }
 }
 """
 
@@ -478,6 +517,7 @@ JS = r"""
 let DATA = null;
 const PAYLOAD_URL = window.CPR_PAYLOAD_URL;
 const COLS = ["SYMBOL","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
+const COMPACT_COLS = ["SYMBOL","Setup","Signal_Direction","Signal_Grade","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_60d","Industry"];
 const FOLLOW_COLS = ["SYMBOL","Industry","Setup","CPR_Width_Pct","Width_Rank_Pct","Segment","Next_Close","Follow_Through"];
 let tab = "best";
 let sort = {col: null, asc: true};
@@ -540,25 +580,26 @@ function toggleWatchlist(symbol) {
 }
 
 function currentFilters() {
-  return { tab, q: $("search").value, seg: $("segment").value, ind: $("industry").value, cls: $("klass").value, bias: $("bias").value, ovl: $("overlay").value, setup: $("setup").value, nn: $("ownNarrow").value, nifty: $("niftyOnly").checked, hide: $("hideUnclassified").checked };
+  return { tab, q: $("search").value, seg: $("segment").value, ind: $("industry").value, cls: $("klass").value, bias: $("bias").value, ovl: $("overlay").value, setup: $("setup").value, nn: $("ownNarrow").value, cols: $("columnMode").value, nifty: $("niftyOnly").checked, hide: $("hideUnclassified").checked };
 }
 
 function applyView(view) {
   if (!view) return;
-  const map = [["search", view.q], ["segment", view.seg], ["industry", view.ind], ["klass", view.cls], ["bias", view.bias], ["overlay", view.ovl], ["setup", view.setup], ["ownNarrow", view.nn]];
+  const map = [["search", view.q], ["segment", view.seg], ["industry", view.ind], ["klass", view.cls], ["bias", view.bias], ["overlay", view.ovl], ["setup", view.setup], ["ownNarrow", view.nn], ["columnMode", view.cols]];
   map.forEach(([id, value]) => { if (value !== undefined && $(id)) $(id).value = value; });
   $("niftyOnly").checked = Boolean(view.nifty);
   $("hideUnclassified").checked = Boolean(view.hide);
   if (view.tab && document.querySelector(`.tabs button[data-tab="${view.tab}"]`)) {
-    document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("on"));
-    document.querySelector(`.tabs button[data-tab="${view.tab}"]`).classList.add("on");
+    document.querySelectorAll(".tabs button").forEach(b => { b.classList.remove("on"); b.setAttribute("aria-selected", "false"); });
+    const selected = document.querySelector(`.tabs button[data-tab="${view.tab}"]`);
+    selected.classList.add("on");
+    selected.setAttribute("aria-selected", "true");
     tab = view.tab;
   }
   render();
 }
 
-function saveCurrentView() {
-  const name = window.prompt("Name this view:");
+function saveCurrentView(name) {
   if (!name || !name.trim()) return;
   const views = readLocal(LOCAL_KEYS.views, []);
   const next = views.filter(v => v.name !== name.trim());
@@ -573,17 +614,15 @@ function alertRules() {
   return Array.isArray(value) ? value : [];
 }
 
-function addAlertRule() {
-  const type = (window.prompt("Alert type: confirmed, wide-confirmed, score, setup, or cpr-class", "confirmed") || "").trim().toLowerCase();
+function addAlertRuleFromForm() {
+  const type = ($("alertType").value || "").trim().toLowerCase();
   const allowed = new Set(["confirmed", "wide-confirmed", "score", "setup", "cpr-class"]);
   if (!allowed.has(type)) { loadingStatus("Unknown alert type. Use confirmed, wide-confirmed, score, setup, or cpr-class.", true); return; }
-  const symbol = (window.prompt("Optional symbol (blank = any):", "") || "").trim().toUpperCase();
-  let value = "";
-  if (type === "score") value = Number(window.prompt("Minimum Signal_Score:", "70"));
-  if (type === "setup") value = (window.prompt("Setup label:", "Long") || "").trim();
-  if (type === "cpr-class") value = (window.prompt("CPR class:", "Wide") || "").trim();
+  const symbol = ($("alertSymbol").value || "").trim().toUpperCase();
+  let value = ($("alertValue").value || "").trim();
+  if (type === "score") value = Number(value || "70");
   if (type === "score" && !Number.isFinite(value)) { loadingStatus("Score threshold must be numeric.", true); return; }
-  const label = window.prompt("Rule name:", `${type}${symbol ? ` · ${symbol}` : ""}`) || `${type}${symbol ? ` · ${symbol}` : ""}`;
+  const label = ($("alertName").value || "").trim() || `${type}${symbol ? ` · ${symbol}` : ""}`;
   const rules = alertRules();
   rules.push({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name: label.trim(), type, symbol, value, enabled: true, createdAt: new Date().toISOString() });
   writeLocal(LOCAL_KEYS.alerts, rules.slice(-30));
@@ -642,6 +681,15 @@ function renderLocalPanel() {
   if (!panel) return;
   if (!localPanelMode) { panel.hidden = true; return; }
   panel.hidden = false;
+  if (localPanelMode === "save") {
+    panel.innerHTML = `<h3>Save current view</h3><p>Stores the current tab, filters, and column mode only in this browser.</p>
+      <div class="form-grid"><label>View name<input id="viewName" type="text" maxlength="60" placeholder="Momentum shortlist"></label></div>
+      <div class="panel-actions"><button id="confirmSaveView" type="button">Save view</button><button id="cancelSaveView" type="button">Cancel</button></div>`;
+    $("confirmSaveView").addEventListener("click", () => saveCurrentView($("viewName").value));
+    $("cancelSaveView").addEventListener("click", () => { localPanelMode = null; renderLocalPanel(); });
+    $("viewName").focus();
+    return;
+  }
   if (localPanelMode === "views") {
     panel.innerHTML = `<h3>Saved views</h3><p>Views are stored only in this browser.</p>${views.length ? views.map((v, i) => `<div class="panel-row"><span>${esc(v.name)}</span><div class="panel-actions"><button type="button" data-view-index="${i}">Apply</button><button type="button" data-delete-view="${i}">Delete</button></div></div>`).join("") : "<p>No saved views yet.</p>"}`;
     panel.querySelectorAll("[data-view-index]").forEach(button => button.addEventListener("click", () => applyView(views[Number(button.dataset.viewIndex)])));
@@ -649,8 +697,16 @@ function renderLocalPanel() {
     return;
   }
   if (localPanelMode === "alerts") {
-    panel.innerHTML = `<h3>Alert rules</h3><p>Rules evaluate the currently loaded completed-session dataset. They do not run in the background.</p><div class="panel-actions"><button id="addAlertRule" type="button">Add rule</button></div>${rules.length ? rules.map(rule => `<div class="panel-row"><span>${esc(rule.name)} · ${esc(rule.type)}${rule.symbol ? ` · ${esc(rule.symbol)}` : ""}</span><button type="button" data-delete-rule="${esc(rule.id)}">Delete</button></div>`).join("") : "<p>No alert rules yet.</p>"}`;
-    $("addAlertRule").addEventListener("click", addAlertRule);
+    panel.innerHTML = `<h3>Alert rules</h3><p>Rules evaluate the currently loaded completed-session dataset. They do not run in the background.</p>
+      <div class="form-grid">
+        <label>Rule name<input id="alertName" type="text" maxlength="60" placeholder="High-confidence setup"></label>
+        <label>Rule type<select id="alertType"><option value="confirmed">Confirmed</option><option value="wide-confirmed">Wide confirmed</option><option value="score">Minimum score</option><option value="setup">Setup label</option><option value="cpr-class">CPR class</option></select></label>
+        <label>Optional symbol<input id="alertSymbol" type="text" placeholder="RELIANCE"></label>
+        <label>Value<input id="alertValue" type="text" placeholder="70, Long, or Wide"></label>
+      </div>
+      <div class="panel-actions"><button id="addAlertRule" type="button">Add rule</button></div>
+      ${rules.length ? rules.map(rule => `<div class="panel-row"><span>${esc(rule.name)} · ${esc(rule.type)}${rule.symbol ? ` · ${esc(rule.symbol)}` : ""}</span><button type="button" data-delete-rule="${esc(rule.id)}">Delete</button></div>`).join("") : "<p>No alert rules yet.</p>"}`;
+    $("addAlertRule").addEventListener("click", addAlertRuleFromForm);
     panel.querySelectorAll("[data-delete-rule]").forEach(button => button.addEventListener("click", () => deleteAlertRule(button.dataset.deleteRule)));
     return;
   }
@@ -781,14 +837,16 @@ function parseFilters() {
     const q = new URLSearchParams(window.location.hash.slice(1));
     const t = q.get("tab");
     if (t && document.querySelector(`.tabs button[data-tab="${t}"]`)) {
-      document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("on"));
-      document.querySelector(`.tabs button[data-tab="${t}"]`).classList.add("on");
+      document.querySelectorAll(".tabs button").forEach(b => { b.classList.remove("on"); b.setAttribute("aria-selected", "false"); });
+      const selected = document.querySelector(`.tabs button[data-tab="${t}"]`);
+      selected.classList.add("on");
+      selected.setAttribute("aria-selected", "true");
       tab = t;
     }
     const sel = (id, name) => { const v = q.get(name); if (v) $(id).value = v; };
     sel("search","q"); sel("segment","seg"); sel("industry","ind");
     sel("klass","cls"); sel("bias","bias"); sel("overlay","ovl");
-    sel("setup","setup"); sel("ownNarrow","nn");
+    sel("setup","setup"); sel("ownNarrow","nn"); sel("columnMode","cols");
     if (q.get("nifty") === "1") $("niftyOnly").checked = true;
     if (q.get("hide") === "1") $("hideUnclassified").checked = true;
   } catch (e) {}
@@ -853,12 +911,13 @@ function cprMiniChart(row) {
   if (close !== null) marks.push(`<line class="price-line" x1="38" x2="382" y1="${y(close).toFixed(1)}" y2="${y(close).toFixed(1)}"/><circle class="price-dot" cx="382" cy="${y(close).toFixed(1)}" r="4"/>`);
   const label = value => value === null ? "—" : Number(value).toFixed(2);
   return `<div class="cpr-chart" role="img" aria-label="CPR band mini chart for ${esc(row.SYMBOL)}">
-    <svg viewBox="0 0 420 180" preserveAspectRatio="none">
+    <svg viewBox="0 0 420 180" preserveAspectRatio="xMidYMid meet">
       ${marks.join("")}
       <text x="6" y="${Math.min(170, Math.max(18, (bandTop || 18) + 4)).toFixed(1)}">CPR</text>
       <text x="38" y="172">BC ${esc(label(bc))}</text>
-      <text x="170" y="172">Pivot ${esc(label(pivot))}</text>
-      <text x="300" y="172">Close ${esc(label(close))}</text>
+      <text x="130" y="172">TC ${esc(label(tc))}</text>
+      <text x="220" y="172">Pivot ${esc(label(pivot))}</text>
+      <text x="320" y="172">Close ${esc(label(close))}</text>
     </svg>
   </div>`;
 }
@@ -926,7 +985,16 @@ function render() {
   if (tab === "bullish") extra = " · strict narrow CPR + close above band + bullish geometry";
   if (tab === "bullish_bias") extra = " · all bullish CPR geometry; not necessarily a narrow breakout";
   $("count").textContent = `${data.length} rows${extra}`;
-  const cols = tab === "follow" ? FOLLOW_COLS : COLS;
+  const cols = tab === "follow" ? FOLLOW_COLS : ($("columnMode").value === "research" ? COLS : COMPACT_COLS);
+  const guide = $("emptyGuide");
+  guide.hidden = data.length !== 0;
+  if (!data.length) {
+    const watchCount = (DATA.tables.watchlist || []).length;
+    guide.innerHTML = tab === "best"
+      ? `No confirmed Long/Short setups for this session. ${watchCount} watchlist candidate${watchCount === 1 ? "" : "s"} available.<button type="button" data-empty-tab="watchlist">Open Watchlist</button>`
+      : "No rows match this view and the current filters. Clear filters or choose another view.";
+    guide.querySelectorAll("[data-empty-tab]").forEach(button => button.addEventListener("click", () => selectTab(button.dataset.emptyTab)));
+  }
   $("head").innerHTML = "<tr>" + cols.map(c =>
     `<th data-col="${c}" class="${sort.col===c?(sort.asc?'sorted asc':'sorted desc'):''}">${c.replaceAll("_"," ")}${sort.col===c?(sort.asc?' ▲':' ▼'):''}</th>`
   ).join("") + "</tr>";
@@ -948,6 +1016,16 @@ function render() {
   syncUrl();
 }
 
+function selectTab(nextTab) {
+  const selected = document.querySelector(`.tabs button[data-tab="${nextTab}"]`);
+  if (!selected) return;
+  document.querySelectorAll(".tabs button").forEach(b => { b.classList.remove("on"); b.setAttribute("aria-selected", "false"); });
+  selected.classList.add("on");
+  selected.setAttribute("aria-selected", "true");
+  tab = nextTab;
+  render();
+}
+
 function syncUrl() {
   const p = new URLSearchParams();
   if (tab !== "best") p.set("tab", tab);
@@ -959,6 +1037,7 @@ function syncUrl() {
   if ($("overlay").value !== "Any") p.set("ovl", $("overlay").value);
   if ($("setup").value !== "Any") p.set("setup", $("setup").value);
   if ($("ownNarrow").value !== "Any") p.set("nn", $("ownNarrow").value);
+  if ($("columnMode").value !== "compact") p.set("cols", $("columnMode").value);
   if ($("niftyOnly").checked) p.set("nifty", "1");
   if ($("hideUnclassified").checked) p.set("hide", "1");
   const h = p.toString();
@@ -968,20 +1047,27 @@ function syncUrl() {
 }
 
 $("drawerClose").addEventListener("click", closeDrawer);
-$("saveViewButton").addEventListener("click", () => { localPanelMode = localPanelMode === "views" ? null : "views"; renderLocalPanel(); });
+$("saveViewButton").addEventListener("click", () => { localPanelMode = localPanelMode === "save" ? null : "save"; renderLocalPanel(); });
+$("savedViewsButton").addEventListener("click", () => { localPanelMode = localPanelMode === "views" ? null : "views"; renderLocalPanel(); });
 $("manageAlertsButton").addEventListener("click", () => { localPanelMode = localPanelMode === "alerts" ? null : "alerts"; renderLocalPanel(); });
 $("alertCenterButton").addEventListener("click", () => { localPanelMode = localPanelMode === "center" ? null : "center"; renderLocalPanel(); });
 $("drawerBackdrop").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", event => { if (event.key === "Escape" && !$("symbolDrawer").hidden) closeDrawer(); });
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("on"));
-    btn.classList.add("on");
-    tab = btn.dataset.tab;
-    render();
+    selectTab(btn.dataset.tab);
+  });
+  btn.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = Array.from(document.querySelectorAll(".tabs button"));
+    const step = event.key === "ArrowRight" ? 1 : -1;
+    const next = buttons[(buttons.indexOf(btn) + step + buttons.length) % buttons.length];
+    selectTab(next.dataset.tab);
+    next.focus();
   });
 });
-["search","segment","industry","klass","bias","overlay","setup","ownNarrow"].forEach(id => {
+["search","segment","industry","klass","bias","overlay","setup","ownNarrow","columnMode"].forEach(id => {
   const el = $(id);
   if (el) el.addEventListener("input", render);
 });
@@ -1031,9 +1117,17 @@ def _write_assets(site_dir: Path) -> None:
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")
 
 
-def _write_page(result: ScanResult, dest: Path, dates: List[str], home_href: str, asset_prefix: str, publication: Optional[dict] = None) -> None:
+def _write_page(
+    result: ScanResult,
+    dest: Path,
+    dates: List[str],
+    home_href: str,
+    asset_prefix: str,
+    publication: Optional[dict] = None,
+    include_downloads: bool = True,
+) -> None:
     dest.mkdir(parents=True, exist_ok=True)
-    downloads = _write_downloads(result, dest / "downloads")
+    downloads = _write_downloads(result, dest / "downloads") if include_downloads else {}
     payload = _payload(result, downloads, dates, home_href, publication=publication)
     (dest / "payload.json").write_text(
         json.dumps(payload, separators=(",", ":"), ensure_ascii=True) + "\n",
@@ -1043,10 +1137,15 @@ def _write_page(result: ScanResult, dest: Path, dates: List[str], home_href: str
     (dest / "manifest.json").write_text(json.dumps({"date": result.date, "metrics": payload["metrics"]}, indent=2), encoding="utf-8")
 
 
-def build_site(output_dir: Path = Path("cpr_output"), site_dir: Path = SITE_DIR) -> List[str]:
-    dates = discover_scan_dates(output_dir)
-    if not dates:
+def build_site(
+    output_dir: Path = Path("cpr_output"),
+    site_dir: Path = SITE_DIR,
+    max_sessions: Optional[int] = DEFAULT_PUBLISHED_SESSIONS,
+) -> List[str]:
+    all_dates = discover_scan_dates(output_dir)
+    if not all_dates:
         raise FileNotFoundError(f"No cpr_full_*.csv files in {output_dir}")
+    dates = all_dates[:max_sessions] if max_sessions is not None and max_sessions > 0 else all_dates
 
     publication = read_manifest(output_dir) or {}
 
@@ -1056,15 +1155,24 @@ def build_site(output_dir: Path = Path("cpr_output"), site_dir: Path = SITE_DIR)
     _write_assets(site_dir)
 
     latest = dates[0]
-    for i, date in enumerate(dates):
-        prev = dates[i + 1] if i + 1 < len(dates) else None
+    for date in dates:
+        source_index = all_dates.index(date)
+        prev = all_dates[source_index + 1] if source_index + 1 < len(all_dates) else None
         result = load_scan_result(date, output_dir=output_dir, previous=prev)
         if date == latest and result.weekly.empty:
             result = attach_htf_to_result(result, output_dir=output_dir, write_csv=True)
         if date == latest:
             _write_page(result, site_dir, dates, home_href="./", asset_prefix="./", publication=publication)
         archive_dir = site_dir / "archive" / date
-        _write_page(result, archive_dir, dates, home_href="../../", asset_prefix="../../", publication=publication)
+        _write_page(
+            result,
+            archive_dir,
+            dates,
+            home_href="../../",
+            asset_prefix="../../",
+            publication=publication,
+            include_downloads=False,
+        )
 
     archive_index = site_dir / "archive" / "index.html"
     links = "\n".join(
@@ -1098,9 +1206,15 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(description="Build the EOD CPR static site")
     parser.add_argument("--output-dir", default="cpr_output")
     parser.add_argument("--site-dir", default="site")
+    parser.add_argument(
+        "--max-sessions",
+        type=int,
+        default=DEFAULT_PUBLISHED_SESSIONS,
+        help="Recent sessions to publish; use 0 for the full archive",
+    )
     parser.add_argument("--serve", type=int, nargs="?", const=8504, help="Serve preview (default port 8504)")
     args = parser.parse_args(argv)
-    build_site(Path(args.output_dir), Path(args.site_dir))
+    build_site(Path(args.output_dir), Path(args.site_dir), max_sessions=args.max_sessions)
     if args.serve:
         serve(Path(args.site_dir), args.serve)
 
