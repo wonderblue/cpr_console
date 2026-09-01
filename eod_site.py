@@ -432,6 +432,7 @@ select, input { background: var(--card); color: var(--text); border: 1px solid v
 .downloads { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 24px 16px; }
 .downloads a { color: var(--bg); background: var(--accent); text-decoration: none; padding: 8px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
 .downloads a.zip { background: var(--bull); }
+.downloads a.tv-btn { background: #1f6feb; color: #ffffff; border: 1px solid #388bfd; font-weight: 700; }
 .local-tools { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 0 24px 12px; padding: 12px 14px; background: #18202a; border: 1px solid var(--line); border-radius: 10px; }
 .local-tool-copy { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 .local-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
@@ -779,6 +780,7 @@ function publicationStatus() {
 function downloads() {
   const d = DATA.downloads;
   $("downloads").innerHTML = [
+    ["🚀 TradingView Charts", "cpr_tradingview_dashboard.html"],
     ["Full CSV", d.full],
     ["Best today", d.best],
     ["Watchlist", d.watchlist],
@@ -791,7 +793,7 @@ function downloads() {
     ["Weekly", d.weekly],
     ["Monthly", d.monthly],
     ["All ZIP", d.zip],
-  ].map(([label, href]) => href ? `<a class="${label==="All ZIP"?"zip":""}" href="${href}" download>${label}</a>` : "").join("");
+  ].map(([label, href]) => href ? `<a class="${label.includes('TradingView') ? 'tv-btn' : label==='All ZIP' ? 'zip' : ''}" href="${href}" ${label.includes('TradingView') ? 'target=\"_blank\"' : 'download'}>${label}</a>` : "").join("");
 }
 
 function fmt(col, val) {
@@ -951,7 +953,12 @@ function openDrawer(row, trigger) {
         ${detailItem("Trend", `${row.Above_SMA50 === true ? "Above" : row.Above_SMA50 === false ? "Below" : "—"} SMA50 · ${row.Above_SMA100 === true ? "Above" : row.Above_SMA100 === false ? "Below" : "—"} SMA100`)}
       </div>
     </section>
-    <section class="drawer-section drawer-actions"><button id="drawerWatchButton" class="drawer-action" type="button"></button></section>
+    <section class="drawer-section drawer-actions" style="display:flex;gap:8px;align-items:center;">
+      <button id="drawerWatchButton" class="drawer-action" type="button"></button>
+      <a id="drawerTvButton" href="https://in.tradingview.com/chart/?symbol=NSE%3A${encodeURIComponent(row.SYMBOL || '')}" target="_blank" class="drawer-action" style="display:inline-flex;align-items:center;gap:6px;background:#1f6feb;color:#fff;border-color:#388bfd;text-decoration:none;font-weight:600;">
+        <span>🚀 Open on TradingView</span>
+      </a>
+    </section>
     <section class="drawer-section">
       <h3>Explanation</h3>
       <p class="drawer-explanation">${esc(row.Strategy_Explanation || row.Signal_Explanation || "No explanation available.")}</p>
