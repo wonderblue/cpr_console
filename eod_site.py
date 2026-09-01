@@ -1115,6 +1115,10 @@ def _write_assets(site_dir: Path) -> None:
     (assets / "style.css").write_text(CSS.strip() + "\n", encoding="utf-8")
     (assets / "app.js").write_text(JS.strip() + "\n", encoding="utf-8")
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")
+    # Include standalone interactive TradingView CPR dashboard if present
+    tv_dash = Path("cpr_tradingview_dashboard.html")
+    if tv_dash.exists():
+        shutil.copy2(tv_dash, site_dir / "cpr_tradingview_dashboard.html")
 
 
 def _write_page(

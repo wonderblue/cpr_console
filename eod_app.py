@@ -21,6 +21,7 @@ from nse_cpr_scanner import (
     HISTORY_LOOKBACK_HTF,
     SETUP_CUSHION_PCT,
     compute_best,
+    compute_monthly_top_watchlist,
     compute_watchlist,
     follow_through,
     scan_eod_cpr,
@@ -443,20 +444,70 @@ with tab_week:
 with tab_month:
     st.caption(
         f"Monthly CPR from the last completed calendar month. Applies to {result.monthly_applies or 'the next month'}. "
-        "If this month is not finished, you are still on last month’s map. Own_Narrow needs several months of cache."
+        "Features dual-track institutional scoring (Narrow CPR Compression + Volume Surge Momentum)."
     )
     if result.monthly.empty:
         st.info("No monthly CPR yet. Scan with history lookback.")
     else:
-        view = apply_filters(result.monthly)
-        st.dataframe(style_table(format_view(view)), use_container_width=True, height=480)
-        st.download_button(
-            "Download monthly (CSV)",
-            data=csv_bytes(view),
-            file_name=f"cpr_monthly_{result.date}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+        m_tab_top, m_tab_full = st.tabs(["🌟 Monthly Top Watchlist (Top 20 / 100)", "📋 Full Monthly Table"])
+        
+        with m_tab_top:
+            col_top_ctrl1, col_top_ctrl2 = st.columns([1, 2])
+            with col_top_ctrl1:
+                wl_size = st.radio("List Size", [20, 100], index=0, horizontal=True, key="month_wl_size")
+            with col_top_ctrl2:
+                wl_cat = st.selectbox("Category Filter", ["All", "Narrow CPR - Breakout", "Above CPR - Volume Strength"], index=0, key="month_wl_cat")
+            
+            top_watchlist = compute_monthly_top_watchlist(
+                monthly_df=result.monthly,
+                n=int(wl_size),
+                daily_df=result.full
+            )
+            
+            if not top_watchlist.empty:
+                if wl_cat != "All":
+                    top_watchlist = top_watchlist[top_watchlist["CATEGORY"] == wl_cat].reset_index(drop=True)
+                
+                st.markdown("### 📈 Interactive TradingView Lightweight CPR Chart")
+                stock_symbols = top_watchlist["SYMBOL"].tolist()
+                selected_sym = st.selectbox("Select stock to inspect", stock_symbols, index=0, key="month_chart_sym")
+                
+                sel_row = top_watchlist[top_watchlist["SYMBOL"] == selected_sym].iloc[0]
+                
+                mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
+                mcol1.metric("LTP", f"₹{sel_row['LTP']:,.2f}", f"{sel_row.get('DAY_CHG_PCT', 0.0):+}%")
+                mcol2.metric("CPR Top (TC)", f"₹{sel_row['CPR_Top']:,.2f}")
+                mcol3.metric("Pivot", f"₹{sel_row['Pivot']:,.2f}")
+                mcol4.metric("CPR Bottom (BC)", f"₹{sel_row['CPR_Bottom']:,.2f}")
+                mcol5.metric("Unified Score", f"{sel_row['UNIFIED_SCORE']:.1f}", sel_row['CATEGORY'])
+                
+                st.info(f"🎯 **Trade Plan & Commentary:** {sel_row['Commentary']}")
+                
+                st.markdown(f"[🚀 Open **{selected_sym}** on TradingView.com](https://in.tradingview.com/chart/?symbol=NSE:{selected_sym})")
+                
+                st.markdown(f"#### Watchlist Table ({len(top_watchlist)} stocks)")
+                st.dataframe(top_watchlist, use_container_width=True, height=420)
+                
+                st.download_button(
+                    f"📥 Download Top {wl_size} Watchlist (CSV)",
+                    data=csv_bytes(top_watchlist),
+                    file_name=f"top_{wl_size}_cpr_watchlist_{result.date}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.info("No candidates qualify for Monthly Top Watchlist.")
+                
+        with m_tab_full:
+            view = apply_filters(result.monthly)
+            st.dataframe(style_table(format_view(view)), use_container_width=True, height=480)
+            st.download_button(
+                "Download full monthly (CSV)",
+                data=csv_bytes(view),
+                file_name=f"cpr_monthly_{result.date}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
 with tab_rules:
     st.markdown(
