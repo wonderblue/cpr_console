@@ -52,6 +52,7 @@ ROUND_2 = {
     "SMA100",
     "Next_Close",
     "DAY_CHG_PCT",
+    "Risk_Multiplier",
 }
 TABLE_COLS = [
     "SYMBOL",
@@ -76,6 +77,7 @@ TABLE_COLS = [
     "Own_Narrow",
     "Overlay",
     "Setup",
+    "Risk_Multiplier",
     "Bias",
     "Price_Position",
     "Segment",
@@ -104,6 +106,11 @@ TABLE_COLS = [
     "Applies",
     "Follow_Through",
     "Next_Close",
+    "Rank",
+    "UNIFIED_SCORE",
+    "CATEGORY",
+    "Commentary",
+    "LTP",
 ]
 
 
@@ -112,7 +119,20 @@ def _date_label(date: str) -> str:
 
 
 def _records(df: pd.DataFrame) -> list:
-    frame = web_frame(df)
+    if df is None or df.empty:
+        return []
+    frame = df.copy()
+    if "DAY_CHG_PCT" not in frame.columns:
+        if "PREVCLOSE" in frame.columns and "CLOSE" in frame.columns:
+            prev_c = pd.to_numeric(frame["PREVCLOSE"], errors="coerce")
+            close_c = pd.to_numeric(frame["CLOSE"], errors="coerce")
+            frame["DAY_CHG_PCT"] = ((close_c - prev_c) / prev_c * 100).round(2)
+        elif "OPEN" in frame.columns and "CLOSE" in frame.columns:
+            op = pd.to_numeric(frame["OPEN"], errors="coerce")
+            close_c = pd.to_numeric(frame["CLOSE"], errors="coerce")
+            frame["DAY_CHG_PCT"] = ((close_c - op) / op * 100).round(2)
+        else:
+            frame["DAY_CHG_PCT"] = 0.0
     cols = [c for c in TABLE_COLS if c in frame.columns]
     out = []
     for rec_in in frame.loc[:, cols].to_dict(orient="records"):
@@ -226,6 +246,13 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
 
     gainers_df = df_movers.sort_values("DAY_CHG_PCT", ascending=False).head(25)
     losers_df = df_movers.sort_values("DAY_CHG_PCT", ascending=True).head(25)
+    from nse_cpr_scanner import compute_weekly_top_watchlist, compute_monthly_top_watchlist
+    weekly_top20_df = getattr(result, "weekly_top20", None)
+    if weekly_top20_df is None or weekly_top20_df.empty:
+        weekly_top20_df = compute_weekly_top_watchlist(result.weekly, n=20, daily_df=result.full)
+    monthly_top20_df = getattr(result, "monthly_top20", None)
+    if monthly_top20_df is None or monthly_top20_df.empty:
+        monthly_top20_df = compute_monthly_top_watchlist(result.monthly, n=20, daily_df=result.full)
 
     return {
         "date": result.date,
@@ -264,7 +291,9 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
             "wide": _records(result.wide) if not result.wide.empty else [],
             "follow": _records(result.follow_through) if not result.follow_through.empty else [],
             "weekly": _records(result.weekly) if not result.weekly.empty else [],
+            "weekly_top20": _records(weekly_top20_df) if not weekly_top20_df.empty else [],
             "monthly": _records(result.monthly) if not result.monthly.empty else [],
+            "monthly_top20": _records(monthly_top20_df) if not monthly_top20_df.empty else [],
         },
     }
 
@@ -443,7 +472,9 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     </div>
     <div class="tab-group" role="tablist" aria-label="Higher timeframe views">
       <button role="tab" aria-selected="false" data-tab="weekly">📅 Weekly CPR</button>
+      <button role="tab" aria-selected="false" data-tab="weekly_top20">🏆 Weekly Top 20</button>
       <button role="tab" aria-selected="false" data-tab="monthly">🗓️ Monthly CPR</button>
+      <button role="tab" aria-selected="false" data-tab="monthly_top20">🏆 Monthly Top 20</button>
     </div>
     <div class="tab-group" role="tablist" aria-label="Review views">
       <button role="tab" aria-selected="false" data-tab="follow">🔄 Follow-through</button>

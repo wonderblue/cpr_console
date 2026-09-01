@@ -428,20 +428,71 @@ with tab_follow:
 with tab_week:
     st.caption(
         f"Weekly CPR from the last completed week (Fri week). Applies to {result.weekly_applies or 'the next week'}. "
-        "Hold the week, not the day. Own_Narrow vs ~52 weekly bars from the 252-day cache."
+        "Hold the week, not the day. Features dual-track scoring (Weekly Compression + Volume Surge)."
     )
     if result.weekly.empty:
         st.info("No weekly CPR yet. Scan with history lookback so bhavcopies can be rolled into weeks.")
     else:
-        view = apply_filters(result.weekly)
-        st.dataframe(style_table(format_view(view)), use_container_width=True, height=480)
-        st.download_button(
-            "Download weekly (CSV)",
-            data=csv_bytes(view),
-            file_name=f"cpr_weekly_{result.date}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+        w_tab_top, w_tab_full = st.tabs(["🌟 Weekly Top Watchlist (Top 20 / 50)", "📋 Full Weekly Table"])
+        
+        with w_tab_top:
+            from nse_cpr_scanner import compute_weekly_top_watchlist
+            col_w_ctrl1, col_w_ctrl2 = st.columns([1, 2])
+            with col_w_ctrl1:
+                w_size = st.radio("List Size", [20, 50], index=0, horizontal=True, key="week_wl_size")
+            with col_w_ctrl2:
+                w_cat = st.selectbox("Category Filter", ["All", "Narrow CPR - Breakout", "Above CPR - Volume Strength"], index=0, key="week_wl_cat")
+            
+            top_weekly = compute_weekly_top_watchlist(
+                weekly_df=result.weekly,
+                n=int(w_size),
+                daily_df=result.full
+            )
+            
+            if not top_weekly.empty:
+                if w_cat != "All":
+                    top_weekly = top_weekly[top_weekly["CATEGORY"] == w_cat].reset_index(drop=True)
+                
+                st.markdown("### 📈 Interactive TradingView Lightweight CPR Chart")
+                w_stock_symbols = top_weekly["SYMBOL"].tolist()
+                w_selected_sym = st.selectbox("Select stock to inspect", w_stock_symbols, index=0, key="week_chart_sym")
+                
+                w_sel_row = top_weekly[top_weekly["SYMBOL"] == w_selected_sym].iloc[0]
+                
+                wcol1, wcol2, wcol3, wcol4, wcol5 = st.columns(5)
+                wcol1.metric("LTP", f"₹{w_sel_row['LTP']:,.2f}", f"{w_sel_row.get('DAY_CHG_PCT', 0.0):+}%")
+                wcol2.metric("CPR Top (TC)", f"₹{w_sel_row['CPR_Top']:,.2f}")
+                wcol3.metric("Pivot", f"₹{w_sel_row['Pivot']:,.2f}")
+                wcol4.metric("CPR Bottom (BC)", f"₹{w_sel_row['CPR_Bottom']:,.2f}")
+                wcol5.metric("Unified Score", f"{w_sel_row['UNIFIED_SCORE']:.1f}", w_sel_row['CATEGORY'])
+                
+                st.info(f"🎯 **Trade Plan & Commentary:** {w_sel_row['Commentary']}")
+                
+                st.markdown(f"[🚀 Open **{w_selected_sym}** on TradingView.com](https://in.tradingview.com/chart/?symbol=NSE:{w_selected_sym})")
+                
+                st.markdown(f"#### Weekly Watchlist Table ({len(top_weekly)} stocks)")
+                st.dataframe(top_weekly, use_container_width=True, height=420)
+                
+                st.download_button(
+                    f"📥 Download Top {w_size} Weekly Watchlist (CSV)",
+                    data=csv_bytes(top_weekly),
+                    file_name=f"top_{w_size}_weekly_cpr_watchlist_{result.date}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.info("No candidates qualify for Weekly Top Watchlist.")
+
+        with w_tab_full:
+            view = apply_filters(result.weekly)
+            st.dataframe(style_table(format_view(view)), use_container_width=True, height=480)
+            st.download_button(
+                "Download weekly (CSV)",
+                data=csv_bytes(view),
+                file_name=f"cpr_weekly_{result.date}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
 with tab_month:
     st.caption(

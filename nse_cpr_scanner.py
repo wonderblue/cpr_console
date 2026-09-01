@@ -1732,6 +1732,154 @@ def compute_monthly_top_watchlist(
     return top_n
 
 
+def generate_weekly_commentary(row: pd.Series) -> str:
+    cpr_top = row.get("CPR_Top", 0.0)
+    cpr_bot = row.get("CPR_Bottom", 0.0)
+    pivot = row.get("Pivot", 0.0)
+    width_pct = row.get("CPR_Width_Pct", 0.0)
+    vol_ratio = row.get("Value_Ratio", 1.0)
+    pos = row.get("Current_Position_LTP", row.get("Price_Position", ""))
+    cat = row.get("CATEGORY", "")
+    chg = row.get("DAY_CHG_PCT", 0.0)
+
+    if width_pct < 0.25:
+        cpr_desc = f"Ultra-tight Weekly Narrow CPR ({width_pct:.2f}%)"
+    elif width_pct < 0.75:
+        cpr_desc = f"Narrow/Moderate Weekly CPR ({width_pct:.2f}%)"
+    elif width_pct < 2.0:
+        cpr_desc = f"Moderate Weekly CPR ({width_pct:.2f}%)"
+    else:
+        cpr_desc = f"Wide Weekly CPR ({width_pct:.2f}%)"
+
+    if vol_ratio >= 10.0:
+        vol_desc = f"massive {vol_ratio:.1f}x volume explosion"
+    elif vol_ratio >= 3.0:
+        vol_desc = f"strong {vol_ratio:.1f}x volume surge"
+    elif vol_ratio >= 1.5:
+        vol_desc = f"above-average {vol_ratio:.1f}x volume"
+    else:
+        vol_desc = f"{vol_ratio:.1f}x average volume"
+
+    if pos == "Above CPR":
+        if chg > 0:
+            action = f"Trading strong above weekly CPR Top (₹{cpr_top:,.2f}) with +{chg:.2f}% weekly gain. Look for bullish continuation above ₹{cpr_top:,.2f}."
+        else:
+            action = f"Consolidating above weekly CPR Top (₹{cpr_top:,.2f}). Hold/buy on pullbacks holding above Pivot (₹{pivot:,.2f})."
+    elif pos == "Below CPR":
+        if width_pct < 0.5:
+            action = f"Currently testing below weekly CPR Bottom (₹{cpr_bot:,.2f}). Due to tight compression, watch for a sharp reclaim above ₹{cpr_top:,.2f} for a false breakdown reversal or breakdown continuation below ₹{cpr_bot:,.2f}."
+        else:
+            action = f"Trading below weekly CPR Bottom (₹{cpr_bot:,.2f}) ({chg:+.2f}%). Needs a clear close above Pivot (₹{pivot:,.2f}) to reverse bearish pressure."
+    else:
+        action = f"Oscillating inside the weekly CPR band (₹{cpr_bot:,.2f} - ₹{cpr_top:,.2f}). Wait for a decisive breakout above ₹{cpr_top:,.2f} or breakdown below ₹{cpr_bot:,.2f}."
+
+    if "Narrow" in cat:
+        return f"{cpr_desc} with {vol_desc}. {action}"
+    else:
+        return f"{vol_desc} backed by weekly bullish structure. {action}"
+
+
+def compute_weekly_top_watchlist(
+    weekly_df: pd.DataFrame,
+    n: int = 20,
+    daily_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Compute Top N (e.g. 20) Weekly CPR Watchlist with dual-track scoring & commentary."""
+    if weekly_df is None or weekly_df.empty:
+        return pd.DataFrame()
+    
+    df = weekly_df.copy()
+    if "History_OK" in df.columns:
+        df = df[df["History_OK"].astype(bool)]
+    if "VALUE" in df.columns:
+        df = df[df["VALUE"] > 5e6]
+    if "CLOSE" in df.columns:
+        df = df[df["CLOSE"] > 5]
+    if df.empty:
+        return pd.DataFrame()
+
+    def _pct_rank(s: pd.Series, ascending: bool = True) -> pd.Series:
+        return s.rank(pct=True, ascending=ascending) * 100
+
+    # Track A: Narrow CPR
+    is_narrow = (df.get("CPR_Class") == "Narrow") | (df.get("Own_Narrow") == True)
+    narrow = df[is_narrow].copy()
+    if not narrow.empty:
+        w_rank = narrow["Width_Rank_Pct"] if "Width_Rank_Pct" in narrow.columns else narrow["CPR_Width_Pct"]
+        narrow["_score"] = (100 - _pct_rank(w_rank)) * 0.40
+        if "VALUE" in narrow.columns:
+            narrow["_score"] += _pct_rank(narrow["VALUE"]) * 0.30
+        if "Value_Ratio" in narrow.columns:
+            narrow["_score"] += _pct_rank(narrow["Value_Ratio"].clip(upper=5)) * 0.20
+        if "Nifty500" in narrow.columns:
+            narrow["_score"] += narrow["Nifty500"].map({True: 10, False: 0}).fillna(0)
+        narrow["CATEGORY"] = "Narrow CPR - Breakout"
+        min_s, max_s = narrow["_score"].min(), narrow["_score"].max()
+        narrow["UNIFIED_SCORE"] = 100.0 if max_s == min_s else ((narrow["_score"] - min_s) / (max_s - min_s) * 100.0)
+
+    # Track B: Above CPR + Volume
+    is_above = (df.get("Price_Position") == "Above CPR") & (df.get("Bias") == "Bullish")
+    if "Value_Ratio" in df.columns:
+        is_above = is_above & (df["Value_Ratio"] > 1.0)
+    above = df[is_above].copy()
+    if not above.empty:
+        above["_score"] = 0.0
+        if "Value_Ratio" in above.columns:
+            above["_score"] += _pct_rank(above["Value_Ratio"].clip(upper=10)) * 0.35
+        if "VALUE" in above.columns:
+            above["_score"] += _pct_rank(above["VALUE"]) * 0.30
+        if "Overlay" in above.columns:
+            above["_score"] += above["Overlay"].map({"Higher": 20, "Inside": 10, "Lower": 0, "Below": 0}).fillna(0)
+        if "Nifty500" in above.columns:
+            above["_score"] += above["Nifty500"].map({True: 10, False: 0}).fillna(0)
+        above["CATEGORY"] = "Above CPR - Volume Strength"
+        min_s, max_s = above["_score"].min(), above["_score"].max()
+        above["UNIFIED_SCORE"] = 100.0 if max_s == min_s else ((above["_score"] - min_s) / (max_s - min_s) * 100.0)
+
+    combined = pd.concat([narrow, above], ignore_index=True) if not (narrow.empty and above.empty) else df.copy()
+    if "UNIFIED_SCORE" in combined.columns:
+        combined = combined.sort_values("UNIFIED_SCORE", ascending=False)
+    combined = combined.drop_duplicates(subset=["SYMBOL"], keep="first")
+    top_n = combined.head(n).reset_index(drop=True)
+    top_n.insert(0, "Rank", top_n.index + 1)
+
+    # Attach LTP and session stats if daily_df is provided
+    if daily_df is not None and not daily_df.empty:
+        daily_cols = ["SYMBOL", "CLOSE", "LAST", "OPEN", "HIGH", "LOW", "VOLUME", "VALUE"]
+        available_cols = [c for c in daily_cols if c in daily_df.columns]
+        d_sub = daily_df[available_cols].copy()
+        if "LAST" in d_sub.columns:
+            d_sub["LTP"] = d_sub["LAST"].fillna(d_sub.get("CLOSE", np.nan))
+        elif "CLOSE" in d_sub.columns:
+            d_sub["LTP"] = d_sub["CLOSE"]
+        
+        top_n = top_n.rename(columns={"CLOSE": "PREV_CLOSE"})
+        top_n = top_n.merge(d_sub[["SYMBOL", "LTP"]], on="SYMBOL", how="left")
+        top_n["LTP"] = top_n["LTP"].fillna(top_n.get("PREV_CLOSE", np.nan))
+    else:
+        top_n["PREV_CLOSE"] = top_n["CLOSE"] if "CLOSE" in top_n.columns else np.nan
+        top_n["LTP"] = top_n["PREV_CLOSE"]
+
+    if "PREV_CLOSE" in top_n.columns and "LTP" in top_n.columns:
+        top_n["DAY_CHG_PCT"] = ((top_n["LTP"] - top_n["PREV_CLOSE"]) / top_n["PREV_CLOSE"] * 100).round(2)
+
+    def _get_cur_pos(r):
+        ltp = r.get("LTP")
+        tc = r.get("CPR_Top")
+        bc = r.get("CPR_Bottom")
+        if pd.isna(ltp) or pd.isna(tc) or pd.isna(bc):
+            return r.get("Price_Position", "Above CPR")
+        if ltp > tc:
+            return "Above CPR"
+        if ltp < bc:
+            return "Below CPR"
+        return "Inside CPR"
+
+    top_n["Current_Position_LTP"] = top_n.apply(_get_cur_pos, axis=1)
+    top_n["Commentary"] = top_n.apply(generate_weekly_commentary, axis=1)
+    return top_n
+
+
 def bullish_bias_view(df: pd.DataFrame) -> pd.DataFrame:
     """Return every row with bullish CPR geometry, independent of width/close breakout filters.
 
