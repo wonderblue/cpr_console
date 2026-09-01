@@ -162,11 +162,14 @@ def compute_own_narrow_duckdb(
         # Merge with current_df
         merged = current_df.merge(stats_df, on="SYMBOL", how="left")
         
-        # Calculate rank percentage against historical widths using DuckDB
+        # Calculate rank percentage and NR4/NR7 multi-day compression using DuckDB
         rank_df = con.execute(
             f"""
             WITH hist AS (
-                SELECT SYMBOL, CPR_Width_Pct
+                SELECT 
+                    SYMBOL, 
+                    CPR_Width_Pct,
+                    ROW_NUMBER() OVER (PARTITION BY SYMBOL ORDER BY Date DESC) as recency_rank
                 FROM read_parquet('{glob_path}', hive_partitioning=1)
                 WHERE Date IN (SELECT * FROM distinct_dates_df)
                   AND CPR_Width_Pct IS NOT NULL
@@ -178,19 +181,25 @@ def compute_own_narrow_duckdb(
             SELECT 
                 curr.SYMBOL,
                 COUNT(hist.CPR_Width_Pct) as total_hist,
-                SUM(CASE WHEN hist.CPR_Width_Pct <= curr.curr_width THEN 1 ELSE 0 END) as below_count
+                SUM(CASE WHEN hist.CPR_Width_Pct <= curr.curr_width THEN 1 ELSE 0 END) as below_count,
+                COALESCE(curr.curr_width <= MIN(CASE WHEN hist.recency_rank <= 3 THEN hist.CPR_Width_Pct END), false) as NR4,
+                COALESCE(curr.curr_width <= MIN(CASE WHEN hist.recency_rank <= 6 THEN hist.CPR_Width_Pct END), false) as NR7
             FROM curr
             JOIN hist ON curr.SYMBOL = hist.SYMBOL
-            GROUP BY curr.SYMBOL
+            GROUP BY curr.SYMBOL, curr.curr_width
             """
         ).df()
 
         if not rank_df.empty:
             rank_df["Width_Rank_Pct"] = (rank_df["below_count"] / rank_df["total_hist"] * 100.0).round(2)
-            merged = merged.merge(rank_df[["SYMBOL", "Width_Rank_Pct"]], on="SYMBOL", how="left")
+            merged = merged.merge(rank_df[["SYMBOL", "Width_Rank_Pct", "NR4", "NR7"]], on="SYMBOL", how="left")
         else:
             merged["Width_Rank_Pct"] = None
+            merged["NR4"] = False
+            merged["NR7"] = False
 
+        merged["NR4"] = merged["NR4"].fillna(False).astype(bool)
+        merged["NR7"] = merged["NR7"].fillna(False).astype(bool)
         merged["Own_Narrow"] = (merged["History_Days"] >= min(30, len(recent_dates))) & (
             merged["CPR_Width_Pct"] <= merged["Threshold_P25"]
         )

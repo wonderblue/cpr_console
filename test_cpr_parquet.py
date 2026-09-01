@@ -85,6 +85,27 @@ class TestCPRParquet(unittest.TestCase):
             parquet_file = parquet_session_path("20260814", tmp_path)
             self.assertTrue(parquet_file.exists())
 
+    def test_compute_own_narrow_and_nr7_duckdb(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            # Create 10 daily sessions
+            for i in range(1, 11):
+                d = f"202608{i:02d}"
+                df = self.sample_df.copy()
+                df["CPR_Width_Pct"] = [0.80 - (i * 0.05), 0.28, 0.66]
+                save_session_parquet(df, d, tmp_path)
+
+            curr_df = self.sample_df.copy()
+            curr_df["CPR_Width_Pct"] = [0.10, 0.35, 0.60]  # RELIANCE is lowest width ever -> NR4 & NR7 True
+            result = compute_own_narrow_duckdb(curr_df, "20260812", lookback_sessions=10, output_dir=tmp_path)
+            self.assertIsNotNone(result)
+            self.assertIn("NR4", result.columns)
+            self.assertIn("NR7", result.columns)
+            rel_row = result[result["SYMBOL"] == "RELIANCE"].iloc[0]
+            self.assertTrue(bool(rel_row["NR4"]))
+            self.assertTrue(bool(rel_row["NR7"]))
+            self.assertTrue(bool(rel_row["Own_Narrow"]))
+
 
 if __name__ == "__main__":
     unittest.main()

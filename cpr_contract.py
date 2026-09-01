@@ -100,6 +100,17 @@ def classify_price_position(close: float, bottom: float, top: float) -> str:
     return "Inside CPR"
 
 
+def classify_virgin_cpr(high: float, low: float, bottom: float, top: float) -> str:
+    """Check if price traded completely outside the active CPR band during the session."""
+    if any(pd.isna(value) for value in (high, low, bottom, top)):
+        return "None"
+    if float(low) > float(top):
+        return "Bullish Virgin"
+    if float(high) < float(bottom):
+        return "Bearish Virgin"
+    return "None"
+
+
 def calculate_cpr_frame(
     frame: pd.DataFrame,
     high_col: str,

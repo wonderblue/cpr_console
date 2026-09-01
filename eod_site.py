@@ -95,6 +95,10 @@ TABLE_COLS = [
     "Strategy_Setup",
     "Strategy_Confirmation",
     "Strategy_Explanation",
+    "NR4",
+    "NR7",
+    "Virgin_CPR",
+    "Triple_Confluence",
     "Applies",
     "Follow_Through",
     "Next_Close",
@@ -314,6 +318,9 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     <span class="strategy-label">Presets:</span>
     <div class="strategy-pills" id="strategyPills">
       <button type="button" class="pill active" data-preset="all">🔥 All Setups</button>
+      <button type="button" class="pill" data-preset="triple_conf">🚀 Triple Confluence (≥+4)</button>
+      <button type="button" class="pill" data-preset="nr7">⚡ NR7 Squeeze</button>
+      <button type="button" class="pill" data-preset="virgin">✨ Virgin CPR</button>
       <button type="button" class="pill" data-preset="narrow">⚡ Narrow Breakout</button>
       <button type="button" class="pill" data-preset="high_confluence">⭐ High Confluence (≥+3)</button>
       <button type="button" class="pill" data-preset="fo_movers">🛡️ F&amp;O Setups</button>
@@ -1424,6 +1431,9 @@ function rows() {
     if (hideUncl && (r.Industry === "Unclassified" || r.Industry === "Diversified")) return false;
 
     // Presets filter
+    if (currentPreset === "triple_conf" && (r.Triple_Confluence !== "Bullish" && Number(r.Confluence_Score || 0) < 4)) return false;
+    if (currentPreset === "nr7" && !r.NR7 && !r.NR4) return false;
+    if (currentPreset === "virgin" && (!r.Virgin_CPR || r.Virgin_CPR === "None")) return false;
     if (currentPreset === "narrow" && r.CPR_Class !== "Narrow" && !r.Own_Narrow) return false;
     if (currentPreset === "high_confluence" && Number(r.Confluence_Score || 0) < 3) return false;
     if (currentPreset === "fo_movers" && r.Segment !== "F&O + Cash") return false;
@@ -1542,6 +1552,8 @@ function openDrawer(row, trigger) {
   $("drawerTitle").textContent = row.SYMBOL || "Symbol";
   $("drawerSubtitle").textContent = [row.NAME, row.Industry, row.Segment].filter(Boolean).join(" · ");
   const confirmation = row.Strategy_Confirmation;
+  const squeezeBadge = row.NR7 ? "⚡ NR7 Squeeze" : (row.NR4 ? "⚡ NR4 Squeeze" : "Standard");
+  const virginBadge = row.Virgin_CPR && row.Virgin_CPR !== "None" ? `✨ ${row.Virgin_CPR}` : "Standard";
   $("drawerBody").innerHTML = `
     <section class="drawer-section drawer-summary">
       <div class="detail-item"><span>Setup Confirmation</span><strong>${badgeHtml(confirmation)}</strong></div>
@@ -1558,6 +1570,8 @@ function openDrawer(row, trigger) {
         ${detailItem("CPR Width %", fmt("CPR_Width_Pct", row.CPR_Width_Pct))}
         ${detailItem("CPR Position", row.Price_Position)}
         ${detailItem("Overlay", row.Overlay)}
+        ${detailItem("Multi-Day Squeeze", squeezeBadge)}
+        ${detailItem("Virgin CPR", virginBadge)}
         ${detailItem("60-Day Turnover", "₹" + fmt("Value_60d", row.Value_60d) + " cr")}
         ${detailItem("Trend (SMA)", `${row.Above_SMA50 === true ? "Above" : "Below"} SMA50 · ${row.Above_SMA100 === true ? "Above" : "Below"} SMA100`)}
       </div>

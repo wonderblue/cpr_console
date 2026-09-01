@@ -697,6 +697,13 @@ def attached_history_features(
     h["prior_bot"] = h.groupby("SYMBOL")["CPR_Bottom"].shift(1)
     h["Width_Rank_Pct"] = h.groupby("SYMBOL")["CPR_Width_Pct"].rank(method="average", pct=True)
     h["History_Days"] = h.groupby("SYMBOL")["session"].transform("count")
+    
+    # Multi-day compression: NR4 and NR7
+    h["min_width_4"] = h.groupby("SYMBOL")["CPR_Width_Pct"].transform(lambda s: s.rolling(4, min_periods=4).min())
+    h["min_width_7"] = h.groupby("SYMBOL")["CPR_Width_Pct"].transform(lambda s: s.rolling(7, min_periods=7).min())
+    h["NR4"] = (h["CPR_Width_Pct"] <= h["min_width_4"]).fillna(False)
+    h["NR7"] = (h["CPR_Width_Pct"] <= h["min_width_7"]).fillna(False)
+
     if "VALUE" in h.columns:
         h["VALUE"] = pd.to_numeric(h["VALUE"], errors="coerce")
         h["Value_60d"] = h.groupby("SYMBOL")["VALUE"].transform("median")
@@ -726,7 +733,7 @@ def attached_history_features(
 
     latest = h["session"].max()
     today = h[h["session"] == latest][
-        ["SYMBOL", "prior_top", "prior_bot", "Width_Rank_Pct", "History_Days", "Value_60d"]
+        ["SYMBOL", "prior_top", "prior_bot", "Width_Rank_Pct", "History_Days", "Value_60d", "NR4", "NR7"]
     ]
     today = today.set_index("SYMBOL")
     if tech_latest.empty:
@@ -766,6 +773,10 @@ def attach_history_features(
         out["Above_SMA100"] = False
         out["Regime"] = "Unknown"
         out["Setup"] = "No setup"
+        out["NR4"] = False
+        out["NR7"] = False
+        out["Virgin_CPR"] = "None"
+        out["Triple_Confluence"] = "None"
         return out
 
     hist = history_df.copy()
@@ -780,7 +791,7 @@ def attach_history_features(
     drop_cols = [
         "Overlay", "Width_Rank_Pct", "Own_Narrow", "History_Days", "History_OK",
         "Value_60d", "ATR14", "Width_ATR", "Value_Ratio", "Above_SMA50",
-        "Above_SMA100", "Regime", "Setup",
+        "Above_SMA100", "Regime", "Setup", "NR4", "NR7", "Virgin_CPR", "Triple_Confluence",
     ]
     out = out.drop(columns=drop_cols, errors="ignore")
     out = out.merge(today.reset_index(), on="SYMBOL", how="left")
@@ -797,6 +808,28 @@ def attach_history_features(
         & (out["History_OK"])
         & (pd.to_numeric(out["CPR_Width_Pct"], errors="coerce") > 0)
     ).fillna(False).astype(bool)
+
+    if "NR4" not in out.columns:
+        out["NR4"] = False
+    if "NR7" not in out.columns:
+        out["NR7"] = False
+    out["NR4"] = out["NR4"].fillna(False).astype(bool)
+    out["NR7"] = out["NR7"].fillna(False).astype(bool)
+
+    # Virgin CPR calculation
+    low_val = pd.to_numeric(out.get("LOW", np.nan), errors="coerce")
+    high_val = pd.to_numeric(out.get("HIGH", np.nan), errors="coerce")
+    pt = pd.to_numeric(out.get("prior_top", np.nan), errors="coerce")
+    pb = pd.to_numeric(out.get("prior_bot", np.nan), errors="coerce")
+    out["Virgin_CPR"] = np.where(
+        (low_val > pt) & pt.notna(),
+        "Bullish Virgin",
+        np.where(
+            (high_val < pb) & pb.notna(),
+            "Bearish Virgin",
+            "None",
+        ),
+    )
 
     if not tech.empty:
         out = out.merge(tech.reset_index(), on="SYMBOL", how="left")
@@ -846,6 +879,19 @@ def attach_history_features(
                 "Watch Long",
                 np.where(own & inside & bear, "Watch Short", np.where(own & inside & neutral, "Watch", "No setup")),
             ),
+        ),
+    )
+
+    # Triple Confluence Flag
+    conf = pd.to_numeric(out["Confluence_Score"], errors="coerce").fillna(0) if "Confluence_Score" in out.columns else pd.Series(0, index=out.index)
+    vr = pd.to_numeric(out["Value_Ratio"], errors="coerce").fillna(1.0) if "Value_Ratio" in out.columns else pd.Series(1.0, index=out.index)
+    out["Triple_Confluence"] = np.where(
+        (conf >= 4) & (out["Above_SMA50"] == True) & (out["Above_SMA100"] == True) & (vr >= 1.2),
+        "Bullish",
+        np.where(
+            (conf <= -4) & (out["Above_SMA50"] == False) & (out["Above_SMA100"] == False) & (vr >= 1.2),
+            "Bearish",
+            "None",
         ),
     )
     return out.drop(columns=["prior_top", "prior_bot"], errors="ignore")
@@ -1124,6 +1170,10 @@ DISPLAY_COLS = [
     "Strategy_Setup",
     "Strategy_Confirmation",
     "Strategy_Explanation",
+    "NR4",
+    "NR7",
+    "Virgin_CPR",
+    "Triple_Confluence",
 ]
 
 WEB_EXPORT_COLS = [
@@ -1147,6 +1197,10 @@ WEB_EXPORT_COLS = [
     "Width_Rank_Pct",
     "CPR_Class",
     "Own_Narrow",
+    "NR4",
+    "NR7",
+    "Virgin_CPR",
+    "Triple_Confluence",
     "Overlay",
     "Setup",
     "Bias",
