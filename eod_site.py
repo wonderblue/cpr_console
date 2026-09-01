@@ -54,11 +54,20 @@ ROUND_2 = {
 }
 TABLE_COLS = [
     "SYMBOL",
+    "NAME",
     "Industry",
+    "OPEN",
+    "HIGH",
+    "LOW",
     "CLOSE",
+    "VOLUME",
+    "VALUE",
     "Pivot",
     "BC",
     "TC",
+    "CPR_Bottom",
+    "CPR_Top",
+    "CPR_Width",
     "CPR_Width_Pct",
     "Width_Rank_Pct",
     "CPR_Class",
@@ -254,145 +263,254 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
   <meta name="data-session" content="{html.escape(payload["date"], quote=True)}"/>
   <title>EOD CPR · {html.escape(payload["label"])}</title>
   <base href="{asset_prefix}">
-  <link rel="stylesheet" href="assets/style.css?v=7"/>
+  <link rel="stylesheet" href="assets/style.css?v=8"/>
+  <script src="assets/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-  <header class="top">
-    <div>
-      <p class="kicker">Daily scan · next-session CPR</p>
-      <h1>NSE EOD CPR</h1>
+  <!-- Toast Notification -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Sticky Main App Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand">
+        <span class="brand-icon">📊</span>
+        <div>
+          <div class="brand-title">NSE EOD CPR</div>
+          <div class="brand-sub">Next-Session Levels · Confluence Screener</div>
+        </div>
+      </div>
+      <label class="date-nav" title="Switch Session">
+        <select id="dateSelect" aria-label="Select scan date"></select>
+      </label>
     </div>
-    <label class="date-nav">Session
-      <select id="dateSelect"></select>
-    </label>
+
+    <div class="header-actions">
+      <button id="copyTvBtn" class="btn btn-primary" type="button" title="Copy current symbols formatted for TradingView">
+        <span>📋 Copy TV Watchlist</span>
+        <span id="tvCountBadge" class="badge-count">0</span>
+      </button>
+      <button id="sectorHeatmapBtn" class="btn btn-secondary" type="button" title="View industry CPR distribution">
+        <span>📊 Sector Breadth</span>
+      </button>
+      <button id="workspaceToggleBtn" class="btn btn-secondary" type="button" title="Personal watchlists, views & alerts">
+        <span>💾 Workspace</span>
+        <span id="alertCountBadge" class="badge-count" style="display:none">0</span>
+      </button>
+      <button id="downloadsToggleBtn" class="btn btn-secondary" type="button" title="Download CSV & ZIP bundles">
+        <span>📥 Downloads</span>
+      </button>
+      <button id="rulesModalBtn" class="btn btn-ghost" type="button" title="Methodology & Formulas">
+        <span>ℹ️ Rules</span>
+      </button>
+    </div>
   </header>
 
-  <section class="banner">
-    Research only. Not investment advice. Daily levels apply to the <strong>next</strong> session.
-    Weekly CPR applies to <strong>the next week</strong>. Monthly CPR applies to <strong>the next month</strong>
-    after the last completed month — not the rest of the current month unless that month is finished.
-    Not an NSE product.
-  </section>
-  <section class="data-status" id="dataStatus">Loading session data…</section>
+  <!-- Interactive KPI Metric Ribbon (Clickable Filters) -->
+  <section class="metrics-ribbon" id="metrics" aria-label="Session summary metrics"></section>
 
-  <section class="metrics" id="metrics"></section>
-
-  <section class="downloads" id="downloads"></section>
-
-  <section class="local-tools" aria-label="Browser-local tools">
-    <div>
-      <p class="kicker">Personal workspace</p>
-      <p class="local-tool-copy">Watchlists, saved views, and alerts stay in this browser. They are not sent to the server.</p>
-    </div>
-    <div class="local-actions">
-      <button id="saveViewButton" type="button">Save current view</button>
-      <button id="savedViewsButton" type="button">Saved views</button>
-      <button id="manageAlertsButton" type="button">Alert rules</button>
-      <button id="alertCenterButton" type="button">Alerts <span id="alertCount" class="tool-count">0</span></button>
+  <!-- Quick Strategy Pill Bar -->
+  <section class="strategy-bar" aria-label="Quick strategy filters">
+    <span class="strategy-label">Presets:</span>
+    <div class="strategy-pills" id="strategyPills">
+      <button type="button" class="pill active" data-preset="all">🔥 All Setups</button>
+      <button type="button" class="pill" data-preset="narrow">⚡ Narrow Breakout</button>
+      <button type="button" class="pill" data-preset="high_confluence">⭐ High Confluence (≥+3)</button>
+      <button type="button" class="pill" data-preset="fo_movers">🛡️ F&amp;O Setups</button>
+      <button type="button" class="pill" data-preset="bullish_geom">🟢 Bullish Geometry</button>
+      <button type="button" class="pill" data-preset="bearish_geom">🔴 Bearish Geometry</button>
+      <button type="button" class="pill" data-preset="top20">🏆 Top 20 Narrow</button>
     </div>
   </section>
-  <section id="localPanel" class="local-panel" hidden aria-live="polite"></section>
 
-  <section class="toolbar">
-    <label class="filter-label">Symbol
-      <input id="search" type="search" placeholder="Search symbol…" autocomplete="off"/>
-    </label>
-    <label class="filter-label">Segment
-      <select id="segment"><option value="Any">Any segment</option><option>F&amp;O + Cash</option><option>Cash Only</option></select>
-    </label>
-    <label class="filter-label">Industry
-      <select id="industry">{industry_opts}</select>
-    </label>
-    <label class="filter-label">CPR class
-      <select id="klass"><option value="Any">Any CPR class</option><option>Narrow</option><option>Moderate</option><option>Wide</option></select>
-    </label>
-    <label class="filter-label">Bias
-      <select id="bias"><option value="Any">Any bias</option><option>Bullish</option><option>Bearish</option><option>Neutral</option></select>
-    </label>
-    <label class="filter-label">Overlay
-      <select id="overlay"><option value="Any">Any overlay</option><option>Higher</option><option>Lower</option><option>Inside</option><option>Outside</option><option>Overlapping</option></select>
-    </label>
-    <label class="filter-label">Setup
-      <select id="setup"><option value="Any">Any setup</option><option>Long</option><option>Short</option><option>Watch Long</option><option>Watch Short</option><option>Watch</option><option>No setup</option></select>
-    </label>
-    <label class="filter-label">Own-history width
-      <select id="ownNarrow"><option value="Any">Own-narrow: any</option><option value="Yes">Own-narrow</option><option value="No">Not own-narrow</option></select>
-    </label>
-    <label class="filter-label">Columns
-      <select id="columnMode"><option value="compact">Trader view</option><option value="research">Research view</option></select>
-    </label>
-    <label class="filter-check"><input id="niftyOnly" type="checkbox"/> Nifty 500</label>
-    <label class="filter-check"><input id="hideUnclassified" type="checkbox"/> Hide Unclassified / Diversified</label>
+  <!-- Primary Filter Toolbar -->
+  <section class="toolbar" aria-label="Table filter controls">
+    <div class="toolbar-primary">
+      <div class="search-wrap">
+        <input id="search" type="search" placeholder="🔍 Search symbol, sector, or setup…" autocomplete="off" aria-label="Search symbol"/>
+      </div>
+      <label class="filter-label">
+        <select id="segment" aria-label="Filter segment">
+          <option value="Any">All Segments</option>
+          <option>F&amp;O + Cash</option>
+          <option>Cash Only</option>
+        </select>
+      </label>
+      <label class="filter-label">
+        <select id="industry" aria-label="Filter industry">{industry_opts}</select>
+      </label>
+      <label class="filter-label">
+        <select id="columnMode" aria-label="Column view mode">
+          <option value="compact">Trader View (with Gauge)</option>
+          <option value="research">Full Research View</option>
+        </select>
+      </label>
+      <button id="toggleAdvFiltersBtn" class="btn btn-sm btn-ghost" type="button">⚙️ More Filters</button>
+    </div>
+
+    <!-- Collapsible Advanced Filters Drawer -->
+    <div id="advFiltersPanel" class="toolbar-advanced" hidden>
+      <label class="filter-label">CPR Class
+        <select id="klass"><option value="Any">Any class</option><option>Narrow</option><option>Moderate</option><option>Wide</option></select>
+      </label>
+      <label class="filter-label">Bias
+        <select id="bias"><option value="Any">Any bias</option><option>Bullish</option><option>Bearish</option><option>Neutral</option></select>
+      </label>
+      <label class="filter-label">Overlay
+        <select id="overlay"><option value="Any">Any overlay</option><option>Higher</option><option>Lower</option><option>Inside</option><option>Outside</option><option>Overlapping</option></select>
+      </label>
+      <label class="filter-label">Setup
+        <select id="setup"><option value="Any">Any setup</option><option>Long</option><option>Short</option><option>Watch Long</option><option>Watch Short</option><option>Watch</option><option>No setup</option></select>
+      </label>
+      <label class="filter-label">Own-history
+        <select id="ownNarrow"><option value="Any">Own-narrow: any</option><option value="Yes">Own-narrow only</option><option value="No">Not own-narrow</option></select>
+      </label>
+      <div class="filter-checkboxes">
+        <label class="filter-check"><input id="niftyOnly" type="checkbox"/> Nifty 500 Only</label>
+        <label class="filter-check"><input id="hideUnclassified" type="checkbox"/> Hide Unclassified / Diversified</label>
+      </div>
+      <button id="resetFiltersBtn" class="btn btn-sm btn-secondary" type="button">Reset Filters</button>
+    </div>
   </section>
-  <p class="count" style="padding-top:0">
-    CPR class is the band as % of close: Narrow ≤ 0.25%, Moderate 0.25–&lt;0.75%, Wide ≥ 0.75%.
-    Own-narrow is that stock versus its own history (60 days, ~12 weeks, or completed months).
-    Setups require a ≥ 0.2% close beyond the band plus a Higher/Lower overlay, and Long / Short are
-    paused in a Risk-Off / Risk-On NIFTY regime. Daily Pivot / BC / TC are tomorrow’s levels.
-    Use the Weekly / Monthly tabs to hold longer.
-  </p>
 
+  <!-- Workspace Panel (Saved Views, Alert Rules, Personal Watchlist) -->
+  <section id="localPanel" class="local-panel" hidden aria-live="polite">
+    <div class="local-tools" aria-label="Browser-local tools">
+      <div>
+        <p class="kicker">Personal Workspace</p>
+        <p class="local-tool-copy">Saved views, alert rules, and personal watchlists are stored locally in your browser.</p>
+      </div>
+      <div class="local-actions">
+        <button id="saveViewButton" type="button">Save current view</button>
+        <button id="savedViewsButton" type="button">Saved views</button>
+        <button id="manageAlertsButton" type="button">Alert rules</button>
+        <button id="alertCenterButton" type="button">Alerts <span id="alertCount" class="tool-count">0</span></button>
+      </div>
+    </div>
+    <div id="localPanelContent" class="local-panel-body"></div>
+  </section>
+
+  <!-- Downloads Popover Panel -->
+  <section id="downloadsPanel" class="downloads-panel" hidden>
+    <div class="downloads-panel-head">
+      <h3>📥 Download Scan Bundles</h3>
+      <button id="closeDownloadsBtn" class="btn btn-sm btn-ghost" type="button">✕</button>
+    </div>
+    <div class="downloads" id="downloads"></div>
+  </section>
+
+  <!-- Navigation View Tabs -->
   <nav class="tabs" id="tabs" aria-label="Data views">
-    <div class="tab-group" role="tablist" aria-label="Daily views"><span>Daily</span>
-      <button role="tab" aria-selected="true" data-tab="best" class="on">Best</button>
-      <button role="tab" aria-selected="false" data-tab="watchlist">Watchlist</button>
-      <button role="tab" aria-selected="false" data-tab="bullish">Long geometry</button>
-      <button role="tab" aria-selected="false" data-tab="bearish">Short geometry</button>
-      <button role="tab" aria-selected="false" data-tab="narrow">Narrow</button>
-      <button role="tab" aria-selected="false" data-tab="wide">Wide</button>
-      <button role="tab" aria-selected="false" data-tab="full">All</button>
+    <div class="tab-group" role="tablist" aria-label="Daily views">
+      <button role="tab" aria-selected="true" data-tab="best" class="on">🎯 Best Today</button>
+      <button role="tab" aria-selected="false" data-tab="watchlist">📋 Watchlist</button>
+      <button role="tab" aria-selected="false" data-tab="bullish">🟢 Bullish CPR</button>
+      <button role="tab" aria-selected="false" data-tab="bearish">🔴 Bearish</button>
+      <button role="tab" aria-selected="false" data-tab="narrow">⚡ Narrow</button>
+      <button role="tab" aria-selected="false" data-tab="wide">↔️ Wide CPR</button>
+      <button role="tab" aria-selected="false" data-tab="full">📊 All Scanned</button>
     </div>
-    <div class="tab-group" role="tablist" aria-label="Higher timeframe views"><span>Higher timeframe</span>
-      <button role="tab" aria-selected="false" data-tab="weekly">Weekly</button>
-      <button role="tab" aria-selected="false" data-tab="monthly">Monthly</button>
+    <div class="tab-group" role="tablist" aria-label="Higher timeframe views">
+      <button role="tab" aria-selected="false" data-tab="weekly">📅 Weekly CPR</button>
+      <button role="tab" aria-selected="false" data-tab="monthly">🗓️ Monthly CPR</button>
     </div>
-    <div class="tab-group" role="tablist" aria-label="Review views"><span>Review</span>
-      <button role="tab" aria-selected="false" data-tab="follow">Follow-through</button>
-      <button role="tab" aria-selected="false" data-tab="top20">Top 20</button>
-      <button role="tab" aria-selected="false" data-tab="bullish_bias">Bullish bias</button>
+    <div class="tab-group" role="tablist" aria-label="Review views">
+      <button role="tab" aria-selected="false" data-tab="follow">🔄 Follow-through</button>
+      <button role="tab" aria-selected="false" data-tab="top20">🏆 Top 20</button>
+      <button role="tab" aria-selected="false" data-tab="bullish_bias">📈 Bullish Bias</button>
     </div>
-    <div class="tab-group" role="tablist" aria-label="Personal views"><span>Personal</span>
-      <button role="tab" aria-selected="false" data-tab="mylist">My list <span id="myListCount" class="tab-count">0</span></button>
+    <div class="tab-group" role="tablist" aria-label="Personal views">
+      <button role="tab" aria-selected="false" data-tab="mylist">★ My list <span id="myListCount" class="tab-count">0</span></button>
     </div>
   </nav>
 
-  <p class="count" id="count"></p>
+  <!-- Table View Status Header -->
+  <div class="table-header-meta">
+    <p class="count" id="count">Loading rows…</p>
+    <div class="data-status" id="dataStatus">Loading session data…</div>
+  </div>
+
   <div class="empty-guide" id="emptyGuide" hidden></div>
+
+  <!-- Main Data Table Wrap -->
   <div class="table-wrap">
-    <table>
+    <table id="mainTable">
       <thead id="head"></thead>
       <tbody id="body"></tbody>
     </table>
   </div>
 
+  <!-- Side Detail Drawer -->
   <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
   <aside id="symbolDrawer" class="symbol-drawer" hidden aria-labelledby="drawerTitle" aria-modal="true" role="dialog">
     <div class="drawer-head">
       <div>
-        <p class="kicker">Symbol context</p>
+        <p class="kicker" id="drawerKicker">Symbol context</p>
         <h2 id="drawerTitle">Symbol</h2>
         <p id="drawerSubtitle" class="drawer-subtitle"></p>
       </div>
-      <button id="drawerClose" class="drawer-close" type="button" aria-label="Close symbol context">Close</button>
+      <button id="drawerClose" class="drawer-close" type="button" aria-label="Close symbol context">✕ Close</button>
     </div>
     <div id="drawerBody"></div>
   </aside>
 
-  <footer>
-    Equity stocks only (ETFs, AMCs, mutual funds excluded). Industry from NSE Nifty 500 official list; non-Nifty-500 stocks use eod2 curated sector data or keyword heuristics.
-    Built from NSE UDI cash + F&amp;O bhavcopy plus ~252 prior cash sessions.
-    CPR = Pivot (H+L+C)/3, BC (H+L)/2, TC 2P−BC.
-    Absolute Narrow ≤ 0.25%. Own_Narrow = bottom 25% of that name’s last 60 widths.
-    Overlay = today’s CPR vs prior session. Setup = Own_Narrow + side + overlay +
-    a ≥ 0.2% close past the band; Long/Short pause when NIFTY regime opposes.
-    Watch Long / Watch Short = Own_Narrow + inside the band + bias.
-    Confluence_Score = Daily (Long +2 / Watch Long +1) + Weekly + Monthly signal (−6 … +6).
-    Weekly / Monthly tabs use the same formulas on completed week and month bars.
-    Top 20 ranks liquid setups (median VALUE ≥ ₹2 cr) by confluence then width percentile.
-    Follow-through compares each setup’s prior-day CPR band to this session’s close.
-    Wide CPR adds separate consolidation and range-breakout states; it does not replace the existing Narrow CPR setup labels.
-    Bullish CPR is the strict narrow, above-band breakout shortlist; Bullish Bias includes all rows with bullish CPR geometry.
+  <!-- Sector Breadth Heatmap Modal -->
+  <div id="heatmapBackdrop" class="drawer-backdrop" hidden></div>
+  <div id="heatmapModal" class="modal-dialog" hidden role="dialog" aria-labelledby="heatmapTitle" aria-modal="true">
+    <div class="modal-head">
+      <h2 id="heatmapTitle">📊 Sector &amp; Industry CPR Breadth</h2>
+      <button id="closeHeatmapBtn" class="btn btn-sm btn-ghost" type="button">✕</button>
+    </div>
+    <div class="modal-body" id="heatmapBody">
+      <p class="modal-sub">Industry distribution of CPR geometry for next session. Click any sector to filter.</p>
+      <div id="heatmapGrid" class="heatmap-grid"></div>
+    </div>
+  </div>
+
+  <!-- Methodology & Rules Modal -->
+  <div id="rulesBackdrop" class="drawer-backdrop" hidden></div>
+  <div id="rulesModal" class="modal-dialog" hidden role="dialog" aria-labelledby="rulesTitle" aria-modal="true">
+    <div class="modal-head">
+      <h2 id="rulesTitle">📖 Methodology &amp; Trading Rules</h2>
+      <button id="closeRulesBtn" class="btn btn-sm btn-ghost" type="button">✕</button>
+    </div>
+    <div class="modal-body">
+      <section class="rules-section">
+        <h3>Prashant Shah CPR Calculation</h3>
+        <p>Formulas calculated from the previous session's completed OHLC bar:</p>
+        <ul>
+          <li><strong>Pivot</strong> = (High + Low + Close) / 3</li>
+          <li><strong>BC (Bottom Central)</strong> = (High + Low) / 2</li>
+          <li><strong>TC (Top Central)</strong> = 2 × Pivot − BC</li>
+          <li><strong>CPR Width %</strong> = |TC − BC| / Close × 100</li>
+        </ul>
+      </section>
+      <section class="rules-section">
+        <h3>Classifications &amp; Signals</h3>
+        <ul>
+          <li><strong>Narrow CPR (≤ 0.25%)</strong>: Close near mid-range → higher probability of directional trend day.</li>
+          <li><strong>Own-Narrow</strong>: CPR Width in the bottom 25% of that specific symbol's own 60-day history.</li>
+          <li><strong>Higher / Lower Overlay</strong>: Today's CPR band sits entirely above (bullish) or below (bearish) prior day's band.</li>
+          <li><strong>Confluence Score (−6 to +6)</strong>: Sum of Daily, Weekly, and Monthly CPR signal alignment.</li>
+          <li><strong>Bullish CPR</strong>: The strict narrow, above-band breakout shortlist; <strong>Bullish Bias</strong> includes all rows with bullish CPR geometry.</li>
+          <li><strong>Wide CPR</strong>: Adds separate consolidation and range-breakout states; it does not replace the existing Narrow CPR setup labels.</li>
+        </ul>
+      </section>
+      <section class="rules-section disclaimer-box">
+        <strong>⚠️ DISCLAIMER:</strong> For research and educational purposes only. Next-session levels are based on NSE Bhavcopy data. Not investment advice or trading recommendation.
+      </section>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <div>NSE EOD CPR Console v2.0 · Next-Session Central Pivot Range Analysis · Research Only</div>
+    <div style="font-size:10px;margin-top:4px;color:var(--muted)">
+      Equity stocks only (ETFs, AMCs, mutual funds excluded). Industry from NSE Nifty 500 official list; non-Nifty-500 stocks use eod2 curated sector data or keyword heuristics.
+      Bullish CPR is the strict narrow, above-band breakout shortlist; Bullish Bias includes all rows with bullish CPR geometry.
+      Wide CPR adds separate consolidation and range-breakout states; it does not replace the existing Narrow CPR setup labels.
+    </div>
   </footer>
+
   <script>window.CPR_PAYLOAD_URL = "payload.json";</script>
   <script src="assets/app.js?v=9"></script>
 </body>
@@ -402,98 +520,380 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
 
 CSS = """
 :root {
-  --bg: #101418;
-  --card: #1a2128;
-  --line: #2a343e;
-  --text: #e7eef5;
-  --muted: #93a0ad;
+  --bg: #0c1015;
+  --card: #141a22;
+  --card-hover: #1b232e;
+  --card-alt: #18202a;
+  --line: #26313f;
+  --line-subtle: #1c2530;
+  --text: #f0f4f8;
+  --muted: #8b99a8;
   --bull: #3ecf8e;
-  --bear: #ef6b6b;
-  --accent: #8ec0f5;
-  --narrow: #c9a7ff;
+  --bull-bg: rgba(62, 207, 142, 0.12);
+  --bear: #f85149;
+  --bear-bg: rgba(248, 81, 73, 0.12);
+  --accent: #58a6ff;
+  --accent-bg: rgba(88, 166, 255, 0.12);
+  --narrow: #bc8cff;
+  --narrow-bg: rgba(188, 140, 255, 0.14);
+  --amber: #f5a623;
+  --amber-bg: rgba(245, 166, 35, 0.14);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
 }
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 "IBM Plex Sans", "Segoe UI", sans-serif; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "IBM Plex Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
 body.drawer-open { overflow: hidden; }
-.top { display: flex; justify-content: space-between; align-items: end; gap: 16px; padding: 28px 24px 12px; border-bottom: 1px solid var(--line); }
-.kicker { margin: 0; color: var(--accent); letter-spacing: .12em; text-transform: uppercase; font-size: 11px; }
-h1 { margin: 4px 0 0; font-size: 28px; font-weight: 650; }
-.date-nav, .filter-label { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
-.filter-check { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; padding: 8px 2px; }
-#industry { min-width: 220px; }
-select, input { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
-.banner { margin: 16px 24px; padding: 12px 14px; background: #18202a; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
-.data-status { margin: 0 24px 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
-.metrics { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; padding: 0 24px 16px; }
-.metric { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
-.metric span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-.metric b { font-size: 22px; }
-.downloads { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 24px 16px; }
-.downloads a { color: var(--bg); background: var(--accent); text-decoration: none; padding: 8px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
-.downloads a.zip { background: var(--bull); }
-.downloads a.tv-btn { background: #1f6feb; color: #ffffff; border: 1px solid #388bfd; font-weight: 700; }
-.local-tools { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 0 24px 12px; padding: 12px 14px; background: #18202a; border: 1px solid var(--line); border-radius: 10px; }
-.local-tool-copy { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
-.local-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.local-actions button, .local-panel button, .drawer-action { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
-.local-actions button:hover, .local-actions button:focus-visible, .local-panel button:hover, .local-panel button:focus-visible, .drawer-action:hover, .drawer-action:focus-visible { border-color: var(--accent); color: var(--accent); }
-.tool-count, .tab-count { display: inline-flex; min-width: 20px; justify-content: center; padding: 1px 5px; border-radius: 999px; background: var(--accent); color: var(--bg); font-size: 11px; font-weight: 700; }
-.local-panel { margin: 0 24px 12px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
-.local-panel h3 { margin: 0 0 8px; font-size: 13px; }
-.local-panel p { margin: 4px 0; color: var(--muted); font-size: 12px; }
-.local-panel .panel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); padding: 8px 0; }
-.local-panel .panel-row:first-child { border-top: 0; }
-.local-panel .panel-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.local-panel .alert-match { color: var(--text); }
-.watch-star { color: var(--accent); font-weight: 700; margin-right: 4px; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 24px 10px; }
-.toolbar .filter-label { min-width: 135px; }
-.toolbar .filter-label:first-child { flex: 1; min-width: 220px; }
-.toolbar input, .toolbar select { width: 100%; }
-.tabs { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 0 24px; }
-.tab-group { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
-.tab-group > span { color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; margin-right: 2px; }
-.tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
-.tabs button.on { color: var(--bg); background: var(--text); border-color: var(--text); }
-.count { padding: 8px 24px; color: var(--muted); font-size: 13px; }
-.empty-guide { margin: 0 24px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
-.empty-guide button { margin-left: 8px; background: var(--accent); color: var(--bg); border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
-.form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
-.form-grid label { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 5px; }
-.table-wrap { padding: 0 24px 40px; overflow: auto; max-height: 70vh; }
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th { position: sticky; top: 0; background: #151b21; text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
-th.sorted { color: var(--text); }
-th.sorted.asc { box-shadow: inset 0 -2px 0 var(--accent); }
-th.sorted.desc { box-shadow: inset 0 2px 0 var(--accent); }
-td { padding: 7px 8px; border-bottom: 1px solid #232b33; }
-tr[data-symbol] { cursor: pointer; }
-tr[data-symbol]:focus-visible td { outline: 2px solid var(--accent); outline-offset: -2px; }
-tr:hover td { background: #182028; }
-.bull { color: var(--bull); font-weight: 600; }
-.bear { color: var(--bear); font-weight: 600; }
-.narrow { color: var(--narrow); }
-footer { padding: 12px 24px 32px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); }
-.drawer-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(4, 7, 10, .68); }
-.symbol-drawer { position: fixed; z-index: 21; top: 0; right: 0; width: min(500px, 100vw); height: 100vh; overflow-y: auto; padding: 24px; background: #151b21; border-left: 1px solid var(--line); box-shadow: -18px 0 48px rgba(0, 0, 0, .34); }
-.drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-.drawer-head h2 { margin: 3px 0 0; font-size: 28px; }
-.drawer-subtitle { margin: 4px 0 0; color: var(--muted); }
-.drawer-close { flex: 0 0 auto; background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
-.drawer-close:hover, .drawer-close:focus-visible { border-color: var(--accent); color: var(--accent); }
-.drawer-section { padding: 18px 0; border-bottom: 1px solid var(--line); }
-.drawer-section h3 { margin: 0 0 10px; font-size: 12px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
-.drawer-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.detail-item { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-.detail-item span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-.detail-item strong { display: block; margin-top: 3px; font-size: 16px; }
-.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.badge { display: inline-flex; align-items: center; width: fit-content; border: 1px solid currentColor; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; line-height: 1.35; }
-.badge.confirmed { color: var(--bull); background: rgba(62, 207, 142, .1); }
-.badge.watch { color: var(--narrow); background: rgba(201, 167, 255, .1); }
-.badge.unavailable { color: var(--bear); background: rgba(239, 107, 107, .1); }
-.badge.neutral { color: var(--muted); background: rgba(147, 160, 173, .08); }
+
+/* Header */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: rgba(20, 26, 34, 0.95);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-icon { font-size: 24px; }
+.brand-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: #fff; }
+.brand-sub { font-size: 11px; color: var(--muted); }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--card-hover); border-color: var(--accent); }
+.btn-primary { background: #1f6feb; border-color: #388bfd; color: #fff; }
+.btn-primary:hover { background: #388bfd; }
+.btn-secondary { background: var(--card-alt); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn-ghost:hover { color: var(--text); background: var(--card); }
+.btn-sm { padding: 4px 8px; font-size: 11px; }
+
+.badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Date Nav */
+.date-nav select, select, input[type="search"], input[type="text"] {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 12px;
+  outline: none;
+}
+select:focus, input:focus { border-color: var(--accent); }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 100;
+  background: #1f6feb;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  animation: slideUp 0.2s ease;
+}
+@keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* Metrics Ribbon */
+.metrics-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 20px;
+  background: #0f141a;
+  border-bottom: 1px solid var(--line-subtle);
+}
+.metric-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.metric-pill:hover { border-color: var(--accent); }
+.metric-pill span { color: var(--muted); }
+.metric-pill b { color: var(--text); font-weight: 700; }
+.metric-pill.bull b { color: var(--bull); }
+.metric-pill.bear b { color: var(--bear); }
+.metric-pill.narrow b { color: var(--narrow); }
+
+/* Strategy Bar */
+.strategy-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  background: var(--card-alt);
+  border-bottom: 1px solid var(--line-subtle);
+  overflow-x: auto;
+}
+.strategy-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; shrink: 0; }
+.strategy-pills { display: flex; gap: 6px; }
+.pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.pill:hover { color: var(--text); border-color: var(--accent); }
+.pill.active { background: var(--accent); border-color: var(--accent); color: #040d1a; font-weight: 700; }
+
+/* Toolbar */
+.toolbar {
+  padding: 8px 20px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.toolbar-primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.search-wrap { flex: 1; min-width: 220px; }
+.search-wrap input { width: 100%; }
+.toolbar-advanced {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.filter-label { font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.filter-check { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.filter-checkboxes { display: flex; gap: 12px; align-items: center; }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.tab-group { display: flex; gap: 4px; align-items: center; }
+.tabs button {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tabs button:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.tabs button.on { color: #fff; background: #1f6feb; border-color: #388bfd; }
+
+.tab-count, .tool-count {
+  display: inline-flex;
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Meta status */
+.table-header-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 20px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--bg);
+}
+.count { margin: 0; }
+.data-status { font-size: 11px; }
+
+/* Table */
+.table-wrap {
+  padding: 0 20px 40px;
+  overflow: auto;
+  max-height: calc(100vh - 280px);
+}
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #161d26;
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+}
+th:hover { color: var(--text); }
+th.sorted { color: var(--accent); }
+td { padding: 7px 10px; border-bottom: 1px solid var(--line-subtle); white-space: nowrap; }
+tr[data-symbol] { cursor: pointer; transition: background 0.1s; }
+tr[data-symbol]:hover td { background: var(--card-hover); }
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.badge.confirmed, .bull { color: var(--bull); font-weight: 600; }
+.badge.confirmed { background: var(--bull-bg); border: 1px solid rgba(62, 207, 142, 0.3); }
+.badge.unavailable, .bear { color: var(--bear); font-weight: 600; }
+.badge.unavailable { background: var(--bear-bg); border: 1px solid rgba(248, 81, 73, 0.3); }
+.badge.watch, .narrow { color: var(--narrow); }
+.badge.watch { background: var(--narrow-bg); border: 1px solid rgba(188, 140, 255, 0.3); }
+.badge.neutral { color: var(--muted); background: rgba(255,255,255,0.06); }
+
+/* CPR Range Visual Gauge */
+.cpr-gauge-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: monospace;
+}
+.gauge-bar {
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  background: #11171f;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+}
+.gauge-bar.above { border-color: var(--bull); color: var(--bull); background: var(--bull-bg); }
+.gauge-bar.inside { border-color: var(--amber); color: var(--amber); background: var(--amber-bg); }
+.gauge-bar.below { border-color: var(--bear); color: var(--bear); background: var(--bear-bg); }
+
+/* Drawer */
+.drawer-backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(2px); }
+.symbol-drawer {
+  position: fixed;
+  z-index: 41;
+  top: 0;
+  right: 0;
+  width: min(560px, 100vw);
+  height: 100vh;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background: var(--card);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 36px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.drawer-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.drawer-head h2 { margin: 2px 0 0; font-size: 24px; color: #fff; }
+.drawer-subtitle { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.drawer-close { background: var(--card-alt); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-sm); padding: 5px 10px; cursor: pointer; }
+.drawer-close:hover { border-color: var(--accent); color: var(--accent); }
+
+.drawer-section { border-bottom: 1px solid var(--line-subtle); padding-bottom: 14px; }
+.drawer-section h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.drawer-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.detail-item { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; }
+.detail-item span { display: block; font-size: 10px; text-transform: uppercase; color: var(--muted); }
+.detail-item strong { display: block; margin-top: 2px; font-size: 14px; color: var(--text); }
+.detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+
+/* SVG Mini-chart fallback */
 .cpr-chart { width: 100%; min-height: 180px; margin: 4px 0 0; padding: 8px 0; background: #11171c; border: 1px solid var(--line); border-radius: 10px; }
 .cpr-chart svg { display: block; width: 100%; height: auto; }
 .cpr-chart .band { fill: rgba(142, 192, 245, .24); stroke: var(--accent); stroke-width: 1; }
@@ -501,28 +901,125 @@ footer { padding: 12px 24px 32px; color: var(--muted); font-size: 12px; border-t
 .cpr-chart .price-dot { fill: var(--bull); }
 .cpr-chart .level-line { stroke: #667482; stroke-width: 1; stroke-dasharray: 4 4; }
 .cpr-chart text { fill: var(--muted); font: 11px "IBM Plex Sans", "Segoe UI", sans-serif; }
-.drawer-explanation { margin: 0; color: var(--muted); }
+
+/* TradingView Chart Container inside Drawer */
+#tv-chart-container {
+  width: 100%;
+  height: 240px;
+  background: #0d1117;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+/* Modals */
+.modal-dialog {
+  position: fixed;
+  z-index: 50;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(800px, 95vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+  padding: 20px 24px;
+}
+.modal-head { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 14px; }
+.modal-head h2 { margin: 0; font-size: 18px; color: #fff; }
+.modal-sub { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+
+/* Sector Breadth Heatmap Grid */
+.heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.sector-card {
+  background: var(--card-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sector-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.sector-name { font-weight: 700; font-size: 12px; color: #fff; margin-bottom: 4px; display: flex; justify-content: space-between; }
+.sector-meta { font-size: 10px; color: var(--muted); display: flex; gap: 8px; }
+.sector-bar-outer { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.1); margin-top: 6px; overflow: hidden; display: flex; }
+.sector-bar-bull { background: var(--bull); height: 100%; }
+.sector-bar-bear { background: var(--bear); height: 100%; }
+
+/* Local Workspace Panel */
+.local-panel { padding: 12px 20px; background: var(--card-alt); border-bottom: 1px solid var(--line); }
+.local-tools { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 10px; }
+.local-tool-copy { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.local-actions { display: flex; gap: 6px; }
+.local-actions button, .local-panel button, .drawer-action { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 5px 8px; cursor: pointer; font-size: 11px; }
+.local-actions button:hover, .drawer-action:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Downloads Panel */
+.downloads-panel {
+  position: absolute;
+  top: 55px;
+  right: 20px;
+  z-index: 30;
+  width: 320px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  padding: 14px;
+}
+.downloads-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.downloads-panel-head h3 { margin: 0; font-size: 13px; color: #fff; }
+.downloads { display: flex; flex-direction: column; gap: 6px; }
+.downloads a {
+  display: block;
+  text-decoration: none;
+  background: var(--card-alt);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.downloads a:hover { border-color: var(--accent); color: var(--accent); }
+.downloads a.tv-btn { background: #1f6feb; color: #fff; border-color: #388bfd; }
+.downloads a.zip { background: rgba(62, 207, 142, 0.15); border-color: var(--bull); color: var(--bull); }
+
+.rules-section { margin-bottom: 14px; }
+.rules-section h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; color: var(--accent); }
+.rules-section ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.disclaimer-box { background: rgba(245, 166, 35, 0.1); border: 1px solid rgba(245, 166, 35, 0.3); border-radius: var(--radius-sm); padding: 10px 12px; color: #f5a623; font-size: 11px; }
+
+.empty-guide { margin: 16px 20px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--muted); text-align: center; }
+.empty-guide button { margin-left: 8px; background: var(--accent); color: #000; border: 0; border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; font-weight: 700; }
+
+.watch-star { color: var(--amber); font-weight: 700; margin-right: 4px; }
+.app-footer { padding: 12px 20px; color: var(--muted); font-size: 11px; text-align: center; border-top: 1px solid var(--line); }
+
 @media (max-width: 800px) {
-  .metrics { grid-template-columns: repeat(2, 1fr); }
-  .top { flex-direction: column; align-items: start; }
-  .symbol-drawer { width: 100vw; padding: 18px; }
-  .local-tools { align-items: flex-start; flex-direction: column; margin-left: 18px; margin-right: 18px; }
-  .local-actions { justify-content: flex-start; }
-  .tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 8px; }
-  .tab-group { flex: 0 0 auto; flex-wrap: nowrap; }
-  .form-grid { grid-template-columns: 1fr; }
+  .app-header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .header-actions { flex-wrap: wrap; }
+  .metrics-ribbon { overflow-x: auto; flex-wrap: nowrap; }
+  .table-wrap { padding: 0 10px 30px; }
+  .symbol-drawer { width: 100vw; padding: 16px; }
 }
 """
 
 JS = r"""
 let DATA = null;
 const PAYLOAD_URL = window.CPR_PAYLOAD_URL;
-const COLS = ["SYMBOL","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
-const COMPACT_COLS = ["SYMBOL","Setup","Signal_Direction","Signal_Grade","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_60d","Industry"];
+const COLS = ["SYMBOL","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
+const COMPACT_COLS = ["SYMBOL","Setup","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_60d","Industry"];
 const FOLLOW_COLS = ["SYMBOL","Industry","Setup","CPR_Width_Pct","Width_Rank_Pct","Segment","Next_Close","Follow_Through"];
 let tab = "best";
+let currentPreset = "all";
 let sort = {col: null, asc: true};
 let drawerTrigger = null;
+let activeTvChart = null;
 
 function $(id) { return document.getElementById(id); }
 
@@ -533,6 +1030,14 @@ function esc(value) {
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function showToast(msg) {
+  const t = $("toast");
+  if (!t) return;
+  t.textContent = msg;
+  t.hidden = false;
+  setTimeout(() => { t.hidden = true; }, 2600);
 }
 
 function badgeClass(value) {
@@ -578,6 +1083,7 @@ function toggleWatchlist(symbol) {
   renderLocalPanel();
   render();
   updateDrawerAction(normalized);
+  showToast(set.has(normalized) ? `★ Added ${normalized} to My list` : `Removed ${normalized} from My list`);
 }
 
 function currentFilters() {
@@ -608,6 +1114,7 @@ function saveCurrentView(name) {
   writeLocal(LOCAL_KEYS.views, next.slice(-20));
   localPanelMode = "views";
   renderLocalPanel();
+  showToast(`Saved view "${name.trim()}"`);
 }
 
 function alertRules() {
@@ -629,6 +1136,7 @@ function addAlertRuleFromForm() {
   writeLocal(LOCAL_KEYS.alerts, rules.slice(-30));
   localPanelMode = "alerts";
   renderLocalPanel();
+  showToast(`Added alert rule "${label.trim()}"`);
 }
 
 function alertMatches(rule, row) {
@@ -678,46 +1186,53 @@ function renderLocalPanel() {
   const matches = currentAlerts();
   $("myListCount").textContent = String(watch.size);
   $("alertCount").textContent = String(matches.length);
-  const panel = $("localPanel");
+  const badge = $("alertCountBadge");
+  if (badge) {
+    badge.textContent = String(matches.length);
+    badge.style.display = matches.length > 0 ? "inline-flex" : "none";
+  }
+  const panel = $("localPanelContent");
   if (!panel) return;
-  if (!localPanelMode) { panel.hidden = true; return; }
-  panel.hidden = false;
+  if (!localPanelMode) {
+    $("localPanel").hidden = true;
+    return;
+  }
+  $("localPanel").hidden = false;
   if (localPanelMode === "save") {
-    panel.innerHTML = `<h3>Save current view</h3><p>Stores the current tab, filters, and column mode only in this browser.</p>
-      <div class="form-grid"><label>View name<input id="viewName" type="text" maxlength="60" placeholder="Momentum shortlist"></label></div>
-      <div class="panel-actions"><button id="confirmSaveView" type="button">Save view</button><button id="cancelSaveView" type="button">Cancel</button></div>`;
+    panel.innerHTML = `<h3>Save Current View</h3><p>Stores active tab, filters, and display settings in this browser.</p>
+      <div style="display:flex;gap:8px;margin-top:8px;"><input id="viewName" type="text" maxlength="60" placeholder="e.g. F&O Momentum Longs" style="flex:1;"><button class="btn btn-primary" id="confirmSaveView" type="button">Save</button><button class="btn btn-ghost" id="cancelSaveView" type="button">Cancel</button></div>`;
     $("confirmSaveView").addEventListener("click", () => saveCurrentView($("viewName").value));
     $("cancelSaveView").addEventListener("click", () => { localPanelMode = null; renderLocalPanel(); });
     $("viewName").focus();
     return;
   }
   if (localPanelMode === "views") {
-    panel.innerHTML = `<h3>Saved views</h3><p>Views are stored only in this browser.</p>${views.length ? views.map((v, i) => `<div class="panel-row"><span>${esc(v.name)}</span><div class="panel-actions"><button type="button" data-view-index="${i}">Apply</button><button type="button" data-delete-view="${i}">Delete</button></div></div>`).join("") : "<p>No saved views yet.</p>"}`;
-    panel.querySelectorAll("[data-view-index]").forEach(button => button.addEventListener("click", () => applyView(views[Number(button.dataset.viewIndex)])));
-    panel.querySelectorAll("[data-delete-view]").forEach(button => button.addEventListener("click", () => { const next = views.slice(); next.splice(Number(button.dataset.deleteView), 1); writeLocal(LOCAL_KEYS.views, next); renderLocalPanel(); }));
+    panel.innerHTML = `<h3>Saved Views</h3>${views.length ? views.map((v, i) => `<div class="panel-row" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);"><span><strong>${esc(v.name)}</strong> · ${esc(v.tab || 'best')}</span><div style="display:flex;gap:6px;"><button class="btn btn-sm" type="button" data-view-index="${i}">Apply</button><button class="btn btn-sm btn-ghost" type="button" data-delete-view="${i}">Delete</button></div></div>`).join("") : "<p style='color:var(--muted);font-size:12px;'>No saved views yet.</p>"}`;
+    panel.querySelectorAll("[data-view-index]").forEach(b => b.addEventListener("click", () => applyView(views[Number(b.dataset.viewIndex)])));
+    panel.querySelectorAll("[data-delete-view]").forEach(b => b.addEventListener("click", () => { const next = views.slice(); next.splice(Number(b.dataset.deleteView), 1); writeLocal(LOCAL_KEYS.views, next); renderLocalPanel(); }));
     return;
   }
   if (localPanelMode === "alerts") {
-    panel.innerHTML = `<h3>Alert rules</h3><p>Rules evaluate the currently loaded completed-session dataset. They do not run in the background.</p>
-      <div class="form-grid">
-        <label>Rule name<input id="alertName" type="text" maxlength="60" placeholder="High-confidence setup"></label>
-        <label>Rule type<select id="alertType"><option value="confirmed">Confirmed</option><option value="wide-confirmed">Wide confirmed</option><option value="score">Minimum score</option><option value="setup">Setup label</option><option value="cpr-class">CPR class</option></select></label>
-        <label>Optional symbol<input id="alertSymbol" type="text" placeholder="RELIANCE"></label>
-        <label>Value<input id="alertValue" type="text" placeholder="70, Long, or Wide"></label>
+    panel.innerHTML = `<h3>Alert Rules</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:6px;margin:8px 0;">
+        <input id="alertName" type="text" placeholder="Rule name">
+        <select id="alertType"><option value="confirmed">Confirmed Setup</option><option value="wide-confirmed">Wide Confirmed</option><option value="score">Min Score</option><option value="setup">Setup Label</option><option value="cpr-class">CPR Class</option></select>
+        <input id="alertSymbol" type="text" placeholder="Symbol (opt)">
+        <input id="alertValue" type="text" placeholder="Value (e.g. 70, Long)">
+        <button class="btn btn-primary" id="addAlertRule" type="button">+ Add Rule</button>
       </div>
-      <div class="panel-actions"><button id="addAlertRule" type="button">Add rule</button></div>
-      ${rules.length ? rules.map(rule => `<div class="panel-row"><span>${esc(rule.name)} · ${esc(rule.type)}${rule.symbol ? ` · ${esc(rule.symbol)}` : ""}</span><button type="button" data-delete-rule="${esc(rule.id)}">Delete</button></div>`).join("") : "<p>No alert rules yet.</p>"}`;
+      ${rules.length ? rules.map(r => `<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>${esc(r.name)} (${esc(r.type)})</span><button class="btn btn-sm btn-ghost" type="button" data-delete-rule="${esc(r.id)}">Delete</button></div>`).join("") : "<p style='color:var(--muted);font-size:12px;'>No alert rules defined.</p>"}`;
     $("addAlertRule").addEventListener("click", addAlertRuleFromForm);
-    panel.querySelectorAll("[data-delete-rule]").forEach(button => button.addEventListener("click", () => deleteAlertRule(button.dataset.deleteRule)));
+    panel.querySelectorAll("[data-delete-rule]").forEach(b => b.addEventListener("click", () => deleteAlertRule(b.dataset.deleteRule)));
     return;
   }
-  panel.innerHTML = `<h3>Current alerts · ${esc(DATA.date)}</h3><p>Matches are based on this published session and can be dismissed locally.</p>${matches.length ? matches.map(item => `<div class="panel-row alert-match"><span><strong>${esc(item.row.SYMBOL)}</strong> · ${esc(item.rule.name)} · ${esc(item.row.Strategy_Explanation || item.row.Signal_Explanation || "Match")}</span><button type="button" data-dismiss-alert="${esc(item.key)}">Dismiss</button></div>`).join("") : "<p>No active matches for this session.</p>"}`;
-  panel.querySelectorAll("[data-dismiss-alert]").forEach(button => button.addEventListener("click", () => dismissAlert(button.dataset.dismissAlert)));
+  panel.innerHTML = `<h3>Active Alerts (${matches.length})</h3>${matches.length ? matches.map(m => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);"><span><strong>${esc(m.row.SYMBOL)}</strong>: ${esc(m.rule.name)}</span><button class="btn btn-sm" type="button" data-dismiss-alert="${esc(m.key)}">Dismiss</button></div>`).join("") : "<p style='color:var(--muted);font-size:12px;'>No active alert matches for this session.</p>"}`;
+  panel.querySelectorAll("[data-dismiss-alert]").forEach(b => b.addEventListener("click", () => dismissAlert(b.dataset.dismissAlert)));
 }
 
 function updateDrawerAction(symbol) {
   const button = $("drawerWatchButton");
-  if (button) button.textContent = isWatched(symbol) ? "Remove from My list" : "Add to My list";
+  if (button) button.textContent = isWatched(symbol) ? "★ In My List" : "☆ Add to My List";
 }
 
 function fillIndustry() {
@@ -756,14 +1271,25 @@ function fillDates() {
 function metrics() {
   const m = DATA.metrics;
   $("metrics").innerHTML = [
-    ["EQ symbols", m.symbols],
-    ["Narrow", m.narrow],
-    ["Own narrow", m.own_narrow ?? "—"],
-    ["Setups", m.setups ?? "—"],
-    ["Bullish CPR", m.bullish],
-    ["F&O names", m.fo],
-    ["NIFTY regime", m.regime || "—"],
-  ].map(([k,v]) => `<div class="metric"><span>${k}</span><b>${v}</b></div>`).join("");
+    ["EQ Symbols", m.symbols, "", "all"],
+    ["Narrow CPR", m.narrow, "narrow", "narrow"],
+    ["Own-Narrow", m.own_narrow ?? "—", "narrow", "own_narrow"],
+    ["Active Setups", m.setups ?? "—", "bull", "setups"],
+    ["Bullish CPR", m.bullish, "bull", "bullish"],
+    ["F&O Names", m.fo, "", "fo"],
+    ["NIFTY Regime", m.regime || "—", m.regime === "Risk On" ? "bull" : m.regime === "Risk Off" ? "bear" : "", "regime"],
+  ].map(([k,v,cls,action]) => `<div class="metric-pill ${cls}" data-metric="${action}" title="Click to filter by ${k}"><span>${k}</span><b>${v}</b></div>`).join("");
+
+  $("metrics").querySelectorAll("[data-metric]").forEach(pill => {
+    pill.addEventListener("click", () => {
+      const action = pill.dataset.metric;
+      if (action === "narrow") { $("klass").value = "Narrow"; selectTab("narrow"); }
+      else if (action === "bullish") { selectTab("bullish"); }
+      else if (action === "setups") { selectTab("best"); }
+      else if (action === "fo") { $("segment").value = "F&O + Cash"; render(); }
+      else if (action === "all") { $("segment").value = "Any"; selectTab("full"); }
+    });
+  });
 }
 
 function publicationStatus() {
@@ -780,25 +1306,25 @@ function publicationStatus() {
 function downloads() {
   const d = DATA.downloads;
   $("downloads").innerHTML = [
-    ["🚀 TradingView Charts", "cpr_tradingview_dashboard.html"],
-    ["Full CSV", d.full],
-    ["Best today", d.best],
-    ["Watchlist", d.watchlist],
-    ["Wide CPR", d.wide],
-    ["Narrow", d.narrow],
+    ["🚀 TradingView Charts (Interactive)", "cpr_tradingview_dashboard.html"],
+    ["Full Universe CSV", d.full],
+    ["Best Today Setups CSV", d.best],
+    ["Complete Watchlist CSV", d.watchlist],
+    ["Wide CPR CSV", d.wide],
+    ["Narrow CPR CSV", d.narrow],
     ["Bullish CPR", d.bullish],
     ["Bullish Bias", d.bullish_bias],
-    ["Bearish", d.bearish],
-    ["Top 20", d.top20],
-    ["Weekly", d.weekly],
-    ["Monthly", d.monthly],
-    ["All ZIP", d.zip],
-  ].map(([label, href]) => href ? `<a class="${label.includes('TradingView') ? 'tv-btn' : label==='All ZIP' ? 'zip' : ''}" href="${href}" ${label.includes('TradingView') ? 'target=\"_blank\"' : 'download'}>${label}</a>` : "").join("");
+    ["Bearish Setups", d.bearish],
+    ["Top 20 Narrow", d.top20],
+    ["Weekly CPR", d.weekly],
+    ["Monthly CPR", d.monthly],
+    ["All ZIP Bundle", d.zip],
+  ].map(([label, href]) => href ? `<a class="${label.includes('TradingView') ? 'tv-btn' : label.includes('ZIP') ? 'zip' : ''}" href="${href}" ${label.includes('TradingView') ? 'target=\"_blank\"' : 'download'}>${label}</a>` : "").join("");
 }
 
 function fmt(col, val) {
   if (val === null || val === undefined) return "—";
-  if (col === "CPR_Width_Pct") return Number(val).toFixed(4);
+  if (col === "CPR_Width_Pct") return Number(val).toFixed(4) + "%";
   if (col === "Width_Rank_Pct" || col === "Confluence_Score" || col === "Signal_Score") return Number(val).toFixed(2);
   if (col === "Value_Ratio") return Number(val).toFixed(2);
   if (["CLOSE","Pivot","BC","TC","Value_60d","ATR14","Width_ATR","Next_Close"].includes(col)) return Number(val).toFixed(2);
@@ -806,7 +1332,25 @@ function fmt(col, val) {
   return val;
 }
 
-function cellHtml(col, val) {
+function cprRangeGauge(row) {
+  const pos = row.Price_Position || "";
+  const close = finite(row.CLOSE);
+  const bottom = finite(row.CPR_Bottom) || finite(row.BC);
+  const top = finite(row.CPR_Top) || finite(row.TC);
+  if (pos === "Above CPR") {
+    return `<div class="cpr-gauge-cell"><span class="gauge-bar above">[ CPR ] ▲</span><span>Above TC</span></div>`;
+  }
+  if (pos === "Below CPR") {
+    return `<div class="cpr-gauge-cell"><span class="gauge-bar below">▼ [ CPR ]</span><span>Below BC</span></div>`;
+  }
+  if (pos === "Inside CPR") {
+    return `<div class="cpr-gauge-cell"><span class="gauge-bar inside">[ =P= ]</span><span>Inside Band</span></div>`;
+  }
+  return `<span class="gauge-bar">${esc(pos || "—")}</span>`;
+}
+
+function cellHtml(col, val, row) {
+  if (col === "CPR_Gauge") return cprRangeGauge(row);
   const rendered = fmt(col, val);
   if (col === "SYMBOL") return `${isWatched(val) ? '<span class="watch-star" title="In My list">★</span>' : ""}${esc(rendered)}`;
   return col === "Strategy_Confirmation" ? badgeHtml(rendered) : esc(rendered);
@@ -845,7 +1389,7 @@ function parseFilters() {
       selected.setAttribute("aria-selected", "true");
       tab = t;
     }
-    const sel = (id, name) => { const v = q.get(name); if (v) $(id).value = v; };
+    const sel = (id, name) => { const v = q.get(name); if (v && $(id)) $(id).value = v; };
     sel("search","q"); sel("segment","seg"); sel("industry","ind");
     sel("klass","cls"); sel("bias","bias"); sel("overlay","ovl");
     sel("setup","setup"); sel("ownNarrow","nn"); sel("columnMode","cols");
@@ -867,7 +1411,7 @@ function rows() {
   const hideUncl = $("hideUnclassified").checked;
   const source = tab === "mylist" ? (DATA.tables.full || []).filter(r => isWatched(r.SYMBOL)) : (DATA.tables[tab] || []);
   return source.filter(r => {
-    if (q && !(String(r.SYMBOL || "").toUpperCase().includes(q))) return false;
+    if (q && !(String(r.SYMBOL || "").toUpperCase().includes(q) || String(r.NAME || "").toUpperCase().includes(q))) return false;
     if (segment !== "Any" && r.Segment !== segment) return false;
     if (industry !== "Any" && r.Industry !== industry) return false;
     if (klassv !== "Any" && r.CPR_Class !== klassv) return false;
@@ -878,6 +1422,14 @@ function rows() {
     if (ownNarrow === "No" && r.Own_Narrow) return false;
     if (niftyOnly && r.Nifty500 !== true) return false;
     if (hideUncl && (r.Industry === "Unclassified" || r.Industry === "Diversified")) return false;
+
+    // Presets filter
+    if (currentPreset === "narrow" && r.CPR_Class !== "Narrow" && !r.Own_Narrow) return false;
+    if (currentPreset === "high_confluence" && Number(r.Confluence_Score || 0) < 3) return false;
+    if (currentPreset === "fo_movers" && r.Segment !== "F&O + Cash") return false;
+    if (currentPreset === "bullish_geom" && r.Bias !== "Bullish" && r.Overlay !== "Higher") return false;
+    if (currentPreset === "bearish_geom" && r.Bias !== "Bearish" && r.Overlay !== "Lower") return false;
+
     return true;
   });
 }
@@ -892,6 +1444,17 @@ function sortRows(data) {
     if (vb == null) return -1;
     if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
     return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+
+function copyTvWatchlist() {
+  const current = rows();
+  if (!current.length) { showToast("No symbols in current view to copy."); return; }
+  const symbols = current.map(r => `NSE:${r.SYMBOL.replace(/\.NS$/, '')}`).join(", ");
+  navigator.clipboard.writeText(symbols).then(() => {
+    showToast(`✓ Copied ${current.length} symbols to clipboard in TradingView format!`);
+  }).catch(() => {
+    showToast("Clipboard copy failed. Please grant permission.");
   });
 }
 
@@ -924,6 +1487,52 @@ function cprMiniChart(row) {
   </div>`;
 }
 
+function initTradingViewChart(row) {
+  const container = $("tv-chart-container");
+  if (!container) return;
+  container.innerHTML = "";
+  if (typeof LightweightCharts === "undefined") {
+    container.innerHTML = cprMiniChart(row);
+    return;
+  }
+  try {
+    activeTvChart = LightweightCharts.createChart(container, {
+      width: container.clientWidth || 500,
+      height: 240,
+      layout: { background: { color: "#0d1117" }, textColor: "#8b949e", fontSize: 11 },
+      grid: { vertLines: { color: "#161b22" }, horzLines: { color: "#161b22" } },
+      timeScale: { borderColor: "#30363d", visible: true },
+      rightPriceScale: { borderColor: "#30363d" },
+    });
+    const candleSeries = activeTvChart.addCandlestickSeries({
+      upColor: "#3ecf8e", downColor: "#f85149", borderVisible: false, wickUpColor: "#3ecf8e", wickDownColor: "#f85149"
+    });
+
+    const open = finite(row.OPEN) || finite(row.CLOSE);
+    const high = finite(row.HIGH) || finite(row.CLOSE);
+    const low = finite(row.LOW) || finite(row.CLOSE);
+    const close = finite(row.CLOSE);
+
+    if (close !== null) {
+      candleSeries.setData([
+        { time: DATA.date ? `${DATA.date.slice(0,4)}-${DATA.date.slice(4,6)}-${DATA.date.slice(6,8)}` : "2026-08-14", open, high, low, close }
+      ]);
+    }
+
+    const tc = finite(row.TC) || finite(row.CPR_Top);
+    const pivot = finite(row.Pivot);
+    const bc = finite(row.BC) || finite(row.CPR_Bottom);
+
+    if (tc !== null) candleSeries.createPriceLine({ price: tc, color: '#3ecf8e', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: 'TC (Top Central)' });
+    if (pivot !== null) candleSeries.createPriceLine({ price: pivot, color: '#f5a623', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, axisLabelVisible: true, title: 'Pivot' });
+    if (bc !== null) candleSeries.createPriceLine({ price: bc, color: '#f85149', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: 'BC (Bottom Central)' });
+
+    activeTvChart.timeScale().fitContent();
+  } catch (e) {
+    container.innerHTML = cprMiniChart(row);
+  }
+}
+
 function detailItem(label, value) {
   return `<div class="detail-item"><span>${esc(label)}</span><strong>${esc(value === null || value === undefined || value === "" ? "—" : value)}</strong></div>`;
 }
@@ -931,43 +1540,44 @@ function detailItem(label, value) {
 function openDrawer(row, trigger) {
   drawerTrigger = trigger || null;
   $("drawerTitle").textContent = row.SYMBOL || "Symbol";
-  $("drawerSubtitle").textContent = [row.Strategy_Setup, row.CPR_Class, row.Price_Position].filter(Boolean).join(" · ");
+  $("drawerSubtitle").textContent = [row.NAME, row.Industry, row.Segment].filter(Boolean).join(" · ");
   const confirmation = row.Strategy_Confirmation;
   $("drawerBody").innerHTML = `
     <section class="drawer-section drawer-summary">
-      <div class="detail-item"><span>Confirmation</span><strong>${badgeHtml(confirmation)}</strong></div>
-      <div class="detail-item"><span>Signal grade</span><strong>${badgeHtml(row.Signal_Grade || row.Signal_Direction)}</strong></div>
+      <div class="detail-item"><span>Setup Confirmation</span><strong>${badgeHtml(confirmation)}</strong></div>
+      <div class="detail-item"><span>Confluence Score</span><strong style="color:var(--accent);font-size:16px;">${esc(row.Confluence_Score || '0')} / 6</strong></div>
     </section>
     <section class="drawer-section">
-      <h3>Next-session CPR band</h3>
-      ${cprMiniChart(row)}
+      <h3>Next-Session CPR Chart (TC / Pivot / BC)</h3>
+      <div id="tv-chart-container"></div>
     </section>
     <section class="drawer-section">
-      <h3>Context</h3>
+      <h3>Context &amp; Key Levels</h3>
       <div class="detail-grid">
-        ${detailItem("Close", fmt("CLOSE", row.CLOSE))}
-        ${detailItem("CPR width %", fmt("CPR_Width_Pct", row.CPR_Width_Pct))}
-        ${detailItem("Price position", row.Price_Position)}
+        ${detailItem("Close Price", "₹" + fmt("CLOSE", row.CLOSE))}
+        ${detailItem("CPR Width %", fmt("CPR_Width_Pct", row.CPR_Width_Pct))}
+        ${detailItem("CPR Position", row.Price_Position)}
         ${detailItem("Overlay", row.Overlay)}
-        ${detailItem("Value ratio", fmt("Value_Ratio", row.Value_Ratio))}
-        ${detailItem("Trend", `${row.Above_SMA50 === true ? "Above" : row.Above_SMA50 === false ? "Below" : "—"} SMA50 · ${row.Above_SMA100 === true ? "Above" : row.Above_SMA100 === false ? "Below" : "—"} SMA100`)}
+        ${detailItem("60-Day Turnover", "₹" + fmt("Value_60d", row.Value_60d) + " cr")}
+        ${detailItem("Trend (SMA)", `${row.Above_SMA50 === true ? "Above" : "Below"} SMA50 · ${row.Above_SMA100 === true ? "Above" : "Below"} SMA100`)}
       </div>
     </section>
-    <section class="drawer-section drawer-actions" style="display:flex;gap:8px;align-items:center;">
-      <button id="drawerWatchButton" class="drawer-action" type="button"></button>
-      <a id="drawerTvButton" href="https://in.tradingview.com/chart/?symbol=NSE%3A${encodeURIComponent(row.SYMBOL || '')}" target="_blank" class="drawer-action" style="display:inline-flex;align-items:center;gap:6px;background:#1f6feb;color:#fff;border-color:#388bfd;text-decoration:none;font-weight:600;">
-        <span>🚀 Open on TradingView</span>
+    <section class="drawer-section" style="display:flex;gap:8px;align-items:center;">
+      <button id="drawerWatchButton" class="btn btn-primary" type="button"></button>
+      <a id="drawerTvButton" href="https://in.tradingview.com/chart/?symbol=NSE%3A${encodeURIComponent(row.SYMBOL || '').replace(/\.NS$/, '')}" target="_blank" class="btn btn-secondary" style="text-decoration:none;">
+        <span>🚀 Open on TradingView.com</span>
       </a>
     </section>
     <section class="drawer-section">
-      <h3>Explanation</h3>
-      <p class="drawer-explanation">${esc(row.Strategy_Explanation || row.Signal_Explanation || "No explanation available.")}</p>
+      <h3>Trade Setup Plan</h3>
+      <p style="margin:0;color:var(--text);font-size:12px;line-height:1.6;">${esc(row.Strategy_Explanation || row.Signal_Explanation || "No explanation available.")}</p>
     </section>`;
   $("drawerBackdrop").hidden = false;
   $("symbolDrawer").hidden = false;
   updateDrawerAction(row.SYMBOL);
   $("drawerWatchButton").addEventListener("click", () => toggleWatchlist(row.SYMBOL));
   document.body.classList.add("drawer-open");
+  setTimeout(() => initTradingViewChart(row), 50);
   $("drawerClose").focus();
 }
 
@@ -977,6 +1587,41 @@ function closeDrawer() {
   document.body.classList.remove("drawer-open");
   if (drawerTrigger) drawerTrigger.focus();
   drawerTrigger = null;
+}
+
+function renderSectorHeatmap() {
+  const rows = DATA.tables.full || [];
+  const secMap = {};
+  rows.forEach(r => {
+    const sec = r.Industry || "Diversified";
+    if (!secMap[sec]) secMap[sec] = { total: 0, above: 0, below: 0, inside: 0, narrow: 0 };
+    secMap[sec].total++;
+    if (r.Price_Position === "Above CPR") secMap[sec].above++;
+    else if (r.Price_Position === "Below CPR") secMap[sec].below++;
+    else secMap[sec].inside++;
+    if (r.CPR_Class === "Narrow" || r.Own_Narrow) secMap[sec].narrow++;
+  });
+  const sorted = Object.entries(secMap).sort((a,b) => b[1].total - a[1].total);
+  $("heatmapGrid").innerHTML = sorted.map(([sec, s]) => {
+    const bullPct = Math.round((s.above / s.total) * 100);
+    const bearPct = Math.round((s.below / s.total) * 100);
+    return `<div class="sector-card" data-sector="${esc(sec)}">
+      <div class="sector-name"><span>${esc(sec)}</span><span style="color:var(--muted)">${s.total}</span></div>
+      <div class="sector-meta"><span>🟢 ${bullPct}% Above</span><span>🔴 ${bearPct}% Below</span><span>⚡ ${s.narrow} Narrow</span></div>
+      <div class="sector-bar-outer"><div class="sector-bar-bull" style="width:${bullPct}%"></div><div class="sector-bar-bear" style="width:${bearPct}%"></div></div>
+    </div>`;
+  }).join("");
+
+  $("heatmapGrid").querySelectorAll("[data-sector]").forEach(card => {
+    card.addEventListener("click", () => {
+      $("industry").value = card.dataset.sector;
+      $("heatmapModal").hidden = true;
+      $("heatmapBackdrop").hidden = true;
+      render();
+    });
+  });
+  $("heatmapModal").hidden = false;
+  $("heatmapBackdrop").hidden = false;
 }
 
 function render() {
@@ -992,13 +1637,16 @@ function render() {
   if (tab === "bullish") extra = " · strict narrow CPR + close above band + bullish geometry";
   if (tab === "bullish_bias") extra = " · all bullish CPR geometry; not necessarily a narrow breakout";
   $("count").textContent = `${data.length} rows${extra}`;
+  const badgeEl = $("tvCountBadge");
+  if (badgeEl) badgeEl.textContent = String(data.length);
+
   const cols = tab === "follow" ? FOLLOW_COLS : ($("columnMode").value === "research" ? COLS : COMPACT_COLS);
   const guide = $("emptyGuide");
   guide.hidden = data.length !== 0;
   if (!data.length) {
     const watchCount = (DATA.tables.watchlist || []).length;
     guide.innerHTML = tab === "best"
-      ? `No confirmed Long/Short setups for this session. ${watchCount} watchlist candidate${watchCount === 1 ? "" : "s"} available.<button type="button" data-empty-tab="watchlist">Open Watchlist</button>`
+      ? `No confirmed Long/Short setups for this session. ${watchCount} watchlist candidate${watchCount === 1 ? "" : "s"} available.<button class="btn btn-primary" type="button" data-empty-tab="watchlist">Open Watchlist</button>`
       : "No rows match this view and the current filters. Clear filters or choose another view.";
     guide.querySelectorAll("[data-empty-tab]").forEach(button => button.addEventListener("click", () => selectTab(button.dataset.emptyTab)));
   }
@@ -1006,7 +1654,7 @@ function render() {
     `<th data-col="${c}" class="${sort.col===c?(sort.asc?'sorted asc':'sorted desc'):''}">${c.replaceAll("_"," ")}${sort.col===c?(sort.asc?' ▲':' ▼'):''}</th>`
   ).join("") + "</tr>";
   $("body").innerHTML = data.map((r, index) =>
-    `<tr tabindex="0" data-symbol="${esc(r.SYMBOL)}" data-index="${index}" title="Open symbol context">` + cols.map(c => `<td class="${klass(c, r[c])}">${cellHtml(c, r[c])}</td>`).join("") + "</tr>"
+    `<tr tabindex="0" data-symbol="${esc(r.SYMBOL)}" data-index="${index}" title="Open symbol context">` + cols.map(c => `<td class="${klass(c, r[c])}">${cellHtml(c, r[c], r)}</td>`).join("") + "</tr>"
   ).join("");
   document.querySelectorAll("#body tr[data-index]").forEach(tr => {
     const open = () => openDrawer(data[Number(tr.dataset.index)], tr);
@@ -1053,13 +1701,73 @@ function syncUrl() {
   }
 }
 
+// Event Listeners
 $("drawerClose").addEventListener("click", closeDrawer);
+$("drawerBackdrop").addEventListener("click", closeDrawer);
+$("copyTvBtn").addEventListener("click", copyTvWatchlist);
+$("sectorHeatmapBtn").addEventListener("click", renderSectorHeatmap);
+$("closeHeatmapBtn").addEventListener("click", () => { $("heatmapModal").hidden = true; $("heatmapBackdrop").hidden = true; });
+$("heatmapBackdrop").addEventListener("click", () => { $("heatmapModal").hidden = true; $("heatmapBackdrop").hidden = true; });
+$("rulesModalBtn").addEventListener("click", () => { $("rulesModal").hidden = false; $("rulesBackdrop").hidden = false; });
+$("closeRulesBtn").addEventListener("click", () => { $("rulesModal").hidden = true; $("rulesBackdrop").hidden = true; });
+$("rulesBackdrop").addEventListener("click", () => { $("rulesModal").hidden = true; $("rulesBackdrop").hidden = true; });
+
+$("toggleAdvFiltersBtn").addEventListener("click", () => {
+  const panel = $("advFiltersPanel");
+  panel.hidden = !panel.hidden;
+});
+
+$("resetFiltersBtn").addEventListener("click", () => {
+  $("klass").value = "Any";
+  $("bias").value = "Any";
+  $("overlay").value = "Any";
+  $("setup").value = "Any";
+  $("ownNarrow").value = "Any";
+  $("niftyOnly").checked = false;
+  $("hideUnclassified").checked = false;
+  $("segment").value = "Any";
+  $("industry").value = "Any";
+  $("search").value = "";
+  currentPreset = "all";
+  document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+  document.querySelector('.pill[data-preset="all"]').classList.add("active");
+  render();
+});
+
+$("workspaceToggleBtn").addEventListener("click", () => {
+  localPanelMode = localPanelMode ? null : "views";
+  renderLocalPanel();
+});
+$("downloadsToggleBtn").addEventListener("click", () => {
+  const p = $("downloadsPanel");
+  p.hidden = !p.hidden;
+});
+$("closeDownloadsBtn").addEventListener("click", () => { $("downloadsPanel").hidden = true; });
+
 $("saveViewButton").addEventListener("click", () => { localPanelMode = localPanelMode === "save" ? null : "save"; renderLocalPanel(); });
 $("savedViewsButton").addEventListener("click", () => { localPanelMode = localPanelMode === "views" ? null : "views"; renderLocalPanel(); });
 $("manageAlertsButton").addEventListener("click", () => { localPanelMode = localPanelMode === "alerts" ? null : "alerts"; renderLocalPanel(); });
 $("alertCenterButton").addEventListener("click", () => { localPanelMode = localPanelMode === "center" ? null : "center"; renderLocalPanel(); });
-$("drawerBackdrop").addEventListener("click", closeDrawer);
-document.addEventListener("keydown", event => { if (event.key === "Escape" && !$("symbolDrawer").hidden) closeDrawer(); });
+
+document.querySelectorAll(".pill").forEach(pill => {
+  pill.addEventListener("click", () => {
+    document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+    pill.classList.add("active");
+    currentPreset = pill.dataset.preset;
+    if (currentPreset === "top20") selectTab("top20");
+    else render();
+  });
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    if (!$("symbolDrawer").hidden) closeDrawer();
+    if (!$("heatmapModal").hidden) { $("heatmapModal").hidden = true; $("heatmapBackdrop").hidden = true; }
+    if (!$("rulesModal").hidden) { $("rulesModal").hidden = true; $("rulesBackdrop").hidden = true; }
+    if (!$("downloadsPanel").hidden) $("downloadsPanel").hidden = true;
+  }
+});
+
 document.querySelectorAll(".tabs button").forEach(btn => {
   btn.addEventListener("click", () => {
     selectTab(btn.dataset.tab);
@@ -1074,6 +1782,7 @@ document.querySelectorAll(".tabs button").forEach(btn => {
     next.focus();
   });
 });
+
 ["search","segment","industry","klass","bias","overlay","setup","ownNarrow","columnMode"].forEach(id => {
   const el = $(id);
   if (el) el.addEventListener("input", render);
@@ -1082,6 +1791,7 @@ document.querySelectorAll(".tabs button").forEach(btn => {
   const el = $(id);
   if (el) el.addEventListener("change", render);
 });
+
 function loadingStatus(message, error = false) {
   const el = $("dataStatus");
   if (!el) return;
@@ -1122,6 +1832,12 @@ def _write_assets(site_dir: Path) -> None:
     (assets / "style.css").write_text(CSS.strip() + "\n", encoding="utf-8")
     (assets / "app.js").write_text(JS.strip() + "\n", encoding="utf-8")
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")
+    
+    # Copy Lightweight Charts standalone library if present
+    lw_chart = Path("lightweight-charts.standalone.production.js")
+    if lw_chart.exists():
+        shutil.copy2(lw_chart, assets / "lightweight-charts.standalone.production.js")
+        
     # Include standalone interactive TradingView CPR dashboard if present
     tv_dash = Path("cpr_tradingview_dashboard.html")
     if tv_dash.exists():
