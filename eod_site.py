@@ -1043,8 +1043,8 @@ tr[data-symbol]:hover td { background: var(--card-hover); }
 JS = r"""
 let DATA = null;
 const PAYLOAD_URL = window.CPR_PAYLOAD_URL;
-const COLS = ["SYMBOL","DAY_CHG_PCT","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
-const COMPACT_COLS = ["SYMBOL","DAY_CHG_PCT","Setup","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_Ratio","Industry"];
+const COLS = ["SYMBOL","DAY_CHG_PCT","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Risk_Multiplier","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
+const COMPACT_COLS = ["SYMBOL","DAY_CHG_PCT","Setup","Risk_Multiplier","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_Ratio","Industry"];
 const FOLLOW_COLS = ["SYMBOL","DAY_CHG_PCT","Industry","Setup","CPR_Width_Pct","Width_Rank_Pct","Segment","Next_Close","Follow_Through"];
 let tab = "best";
 let currentPreset = "all";
@@ -1380,6 +1380,7 @@ function fmt(col, val) {
   if (col === "DAY_CHG_PCT") return (Number(val) > 0 ? "+" : "") + Number(val).toFixed(2) + "%";
   if (col === "CPR_Width_Pct") return Number(val).toFixed(4) + "%";
   if (col === "Width_Rank_Pct" || col === "Confluence_Score" || col === "Signal_Score") return Number(val).toFixed(2);
+  if (col === "Risk_Multiplier") return Number(val) > 0 ? Number(val).toFixed(1) + "R" : "0.0R";
   if (col === "Value_Ratio") return Number(val).toFixed(2);
   if (["CLOSE","Pivot","BC","TC","Value_60d","ATR14","Width_ATR","Next_Close"].includes(col)) return Number(val).toFixed(2);
   if (["Own_Narrow","Nifty500","Above_SMA50","Above_SMA100","History_OK"].includes(col)) return val ? "Yes" : "No";

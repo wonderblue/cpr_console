@@ -164,6 +164,8 @@ def format_view(df: pd.DataFrame) -> pd.DataFrame:
         show["Width_Rank_Pct"] = show["Width_Rank_Pct"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
     if "Value_Ratio" in show.columns:
         show["Value_Ratio"] = show["Value_Ratio"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
+    if "Risk_Multiplier" in show.columns:
+        show["Risk_Multiplier"] = show["Risk_Multiplier"].apply(lambda x: f"{x:.1f}R" if pd.notna(x) and x > 0 else "0.0R")
     cols = [c for c in DISPLAY_COLS if c in show.columns]
     extra = [c for c in show.columns if c not in cols]
     return show[cols + extra]

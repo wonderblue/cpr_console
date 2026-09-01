@@ -860,33 +860,69 @@ def attach_history_features(
     bull = out["Bias"] == "Bullish"
     bear = out["Bias"] == "Bearish"
     neutral = out["Bias"] == "Neutral"
-    long_ok = (
+    own = out["Own_Narrow"].astype(bool)
+
+    vr = pd.to_numeric(out["Value_Ratio"], errors="coerce").fillna(1.0) if "Value_Ratio" in out.columns else pd.Series(1.0, index=out.index)
+    val = pd.to_numeric(out["VALUE"], errors="coerce").fillna(0.0) if "VALUE" in out.columns else pd.Series(0.0, index=out.index)
+    sma50_ok = out["Above_SMA50"] == True
+    sma100_ok = out["Above_SMA100"] == True
+    is_risk_off = out["Regime"] == "Risk Off"
+    is_risk_on = out["Regime"] == "Risk On"
+
+    # Base breakout and breakdown geometry
+    long_geom = (
         above
         & bull
         & (out["Overlay"] == "Higher")
         & ((close - out["CPR_Top"]) / close * 100 >= SETUP_CUSHION_PCT)
+        & own
     )
-    short_ok = (
+    short_geom = (
         below
         & bear
         & (out["Overlay"] == "Lower")
         & ((out["CPR_Bottom"] - close) / close * 100 >= SETUP_CUSHION_PCT)
+        & own
     )
-    long_ok &= out["Regime"] != "Risk Off"
-    short_ok &= out["Regime"] != "Risk On"
-    own = out["Own_Narrow"].astype(bool)
+
+    # Multi-Tier Setup Classification
+    defiance_long = long_geom & is_risk_off & (vr >= 1.8) & (val >= 2e7) & sma50_ok & sma100_ok
+    surge_short = short_geom & (vr >= 1.8) & (val >= 2e7) & (~sma50_ok)
+    standard_long = long_geom & (~is_risk_off)
+    standard_short = short_geom & (~is_risk_on) & (~surge_short)
+
+    watch_short_geom = own & inside & bear
+    watch_long_geom = own & inside & bull
+    watch_neutral_geom = own & inside & neutral
+
+    # Backward-compatible Setup column
     out["Setup"] = np.where(
-        own & long_ok,
+        defiance_long | standard_long,
         "Long",
         np.where(
-            own & short_ok,
+            surge_short | standard_short,
             "Short",
             np.where(
-                own & inside & bull,
+                watch_long_geom,
                 "Watch Long",
-                np.where(own & inside & bear, "Watch Short", np.where(own & inside & neutral, "Watch", "No setup")),
-            ),
-        ),
+                np.where(
+                    watch_short_geom,
+                    "Watch Short",
+                    np.where(watch_neutral_geom, "Watch", "No setup")
+                )
+            )
+        )
+    )
+
+    # Position sizing Risk Multiplier (0.0R / 0.5R / 1.0R)
+    out["Risk_Multiplier"] = np.where(
+        surge_short | (standard_long & (out["Regime"] == "Risk On")),
+        1.0,
+        np.where(
+            defiance_long | standard_short | (standard_long & (out["Regime"] == "Neutral")),
+            0.5,
+            0.0
+        )
     )
 
     # Triple Confluence Flag
@@ -1181,6 +1217,7 @@ DISPLAY_COLS = [
     "NR7",
     "Virgin_CPR",
     "Triple_Confluence",
+    "Risk_Multiplier",
 ]
 
 WEB_EXPORT_COLS = [
@@ -1210,6 +1247,7 @@ WEB_EXPORT_COLS = [
     "Triple_Confluence",
     "Overlay",
     "Setup",
+    "Risk_Multiplier",
     "Bias",
     "Price_Position",
     "Segment",

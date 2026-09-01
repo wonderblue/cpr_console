@@ -231,6 +231,38 @@ class TestEquityAndIndustry(unittest.TestCase):
         self.assertIn("UNIFIED_SCORE", top.columns)
         self.assertIn("Rank", top.columns)
 
+    def test_defiance_long_and_dynamic_risk_multiplier(self):
+        from nse_cpr_scanner import attach_history_features
+        
+        # Create test panel
+        hist = pd.DataFrame({
+            "SYMBOL": ["LEADER", "WEAKLONG", "SURGESHORT", "WEAKSHORT"] * 50,
+            "session": [f"20260{i//4 + 10:02d}{i%4 + 1:02d}" for i in range(200)],
+            "OPEN": [100.0, 100.0, 100.0, 100.0] * 50,
+            "HIGH": [105.0, 105.0, 105.0, 105.0] * 50,
+            "LOW": [95.0, 95.0, 95.0, 95.0] * 50,
+            "CLOSE": [104.0, 104.0, 96.0, 96.0] * 50,
+            "VOLUME": [1000000] * 200,
+            "VALUE": [5e7] * 200,
+            "CPR_Width": [0.2] * 200,
+            "CPR_Width_Pct": [0.2] * 200,
+            "CPR_Top": [101.0, 101.0, 99.0, 99.0] * 50,
+            "CPR_Bottom": [99.0, 99.0, 97.0, 97.0] * 50,
+            "Pivot": [100.0, 100.0, 98.0, 98.0] * 50,
+            "BC": [99.0, 99.0, 97.0, 97.0] * 50,
+            "TC": [101.0, 101.0, 99.0, 99.0] * 50,
+            "Price_Position": ["Above CPR", "Above CPR", "Below CPR", "Below CPR"] * 50,
+            "Bias": ["Bullish", "Bullish", "Bearish", "Bearish"] * 50,
+            "Overlay": ["Higher", "Higher", "Lower", "Lower"] * 50,
+            "Regime": ["Risk Off"] * 200,
+        })
+        scan = hist[hist["session"] == "20260594"].copy() if "20260594" in hist["session"].values else hist.tail(4).copy()
+        out = attach_history_features(scan, hist, own_window=40, min_history=20)
+        
+        self.assertIn("Risk_Multiplier", out.columns)
+        self.assertTrue((out["Risk_Multiplier"] >= 0.0).all())
+        self.assertTrue((out["Risk_Multiplier"] <= 1.0).all())
+
 
 if __name__ == "__main__":
     unittest.main()
