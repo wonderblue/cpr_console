@@ -302,8 +302,8 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     return view.reset_index(drop=True)
 
 
-tab_best, tab_full, tab_narrow, tab_bull, tab_bear, tab_top, tab_wl, tab_follow, tab_week, tab_month, tab_rules = st.tabs(
-    ["Best today", "Full table", "Narrow", "Bullish CPR", "Bearish CPR", "Top 20 narrow", "Watchlist", "Follow-through", "Weekly CPR", "Monthly CPR", "Rules"]
+tab_best, tab_jcurve, tab_full, tab_narrow, tab_bull, tab_bear, tab_top, tab_wl, tab_follow, tab_week, tab_month, tab_rules = st.tabs(
+    ["Best today", "🚀 J-Curve", "Full table", "Narrow", "Bullish CPR", "Bearish CPR", "Top 20 narrow", "Watchlist", "Follow-through", "Weekly CPR", "Monthly CPR", "Rules"]
 )
 
 with tab_best:
@@ -320,6 +320,55 @@ with tab_best:
             mime="text/csv",
             use_container_width=True,
         )
+
+with tab_jcurve:
+    st.caption("Spotting turnarounds ahead of the crowd: 🪝 J-Curve Ready (Support defense + absorption coiling, 0.5R) and 🚀 J-Curve Liftoff (Kinetic TC breakout + ascending CPR overlay, 1.0R).")
+    
+    jc_df = result.jcurve if hasattr(result, "jcurve") and not result.jcurve.empty else pd.DataFrame()
+    if jc_df.empty and "JCurve_Stage" in result.full.columns:
+        jc_df = result.full[result.full["JCurve_Stage"].isin(["Liftoff", "Ready"])].sort_values(["JCurve_Stage", "JCurve_Score"], ascending=[True, False]).reset_index(drop=True)
+    
+    if jc_df.empty:
+        st.info("No active J-Curve Ready or Liftoff setups in today's scan.")
+    else:
+        col_jc1, col_jc2 = st.columns([1, 2])
+        with col_jc1:
+            stage_filter = st.radio("J-Curve Stage", ["All", "🚀 Liftoff Only", "🪝 Ready Only"], horizontal=True, key="jc_stage_filter")
+        
+        view_jc = jc_df.copy()
+        if stage_filter == "🚀 Liftoff Only":
+            view_jc = view_jc[view_jc["JCurve_Stage"] == "Liftoff"].reset_index(drop=True)
+        elif stage_filter == "🪝 Ready Only":
+            view_jc = view_jc[view_jc["JCurve_Stage"] == "Ready"].reset_index(drop=True)
+        
+        if not view_jc.empty:
+            st.markdown("### 📈 Interactive J-Curve Stock Inspector")
+            jc_symbols = view_jc["SYMBOL"].tolist()
+            sel_jc_sym = st.selectbox("Select J-Curve Stock to Inspect", jc_symbols, index=0, key="jc_sym_select")
+            sel_jc_row = view_jc[view_jc["SYMBOL"] == sel_jc_sym].iloc[0]
+            
+            jcol1, jcol2, jcol3, jcol4, jcol5 = st.columns(5)
+            jcol1.metric("LTP", f"₹{sel_jc_row['CLOSE']:,.2f}", f"{sel_jc_row.get('DAY_CHG_PCT', 0.0):+}%")
+            jcol2.metric("CPR Top (TC)", f"₹{sel_jc_row['CPR_Top']:,.2f}")
+            jcol3.metric("Pivot", f"₹{sel_jc_row['Pivot']:,.2f}")
+            jcol4.metric("Stage", sel_jc_row['JCurve_Stage'], f"{sel_jc_row.get('Risk_Multiplier', 1.0)}R Risk")
+            jcol5.metric("J-Curve Score", f"{sel_jc_row['JCurve_Score']}/100", f"{sel_jc_row.get('Value_Ratio', 1.0):.1f}x Vol")
+            
+            st.info(f"🎯 **Actionable Trade Plan:** {sel_jc_row['JCurve_Explanation']}")
+            st.markdown(f"[🚀 Open **{sel_jc_sym}** on TradingView.com](https://in.tradingview.com/chart/?symbol=NSE:{sel_jc_sym})")
+            
+            st.markdown(f"#### J-Curve Candidates Table ({len(view_jc)} setups)")
+            st.dataframe(style_table(format_view(view_jc)), use_container_width=True, height=420)
+            
+            st.download_button(
+                "📥 Download J-Curve Setups (CSV)",
+                data=csv_bytes(view_jc),
+                file_name=f"cpr_jcurve_{result.date}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        else:
+            st.info(f"No setups matching '{stage_filter}'.")
 
 with tab_full:
     view = apply_filters(result.full)

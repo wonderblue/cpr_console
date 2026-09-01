@@ -111,6 +111,9 @@ TABLE_COLS = [
     "CATEGORY",
     "Commentary",
     "LTP",
+    "JCurve_Stage",
+    "JCurve_Score",
+    "JCurve_Explanation",
 ]
 
 
@@ -173,6 +176,8 @@ def _write_downloads(result: ScanResult, dest: Path) -> dict:
     }
     if not result.wide.empty:
         mapping["wide"] = ("cpr_wide.csv", result.wide)
+    if hasattr(result, "jcurve") and not result.jcurve.empty:
+        mapping["jcurve"] = ("cpr_jcurve.csv", result.jcurve)
     files = []
     for key, (name, frame) in mapping.items():
         path = dest / name
@@ -287,6 +292,7 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
             "bearish": _records(result.bearish),
             "top20": _records(result.top20),
             "best": _records(result.best) if not result.best.empty else [],
+            "jcurve": _records(result.jcurve) if hasattr(result, "jcurve") and not result.jcurve.empty else [],
             "watchlist": _records(result.watchlist) if not result.watchlist.empty else [],
             "wide": _records(result.wide) if not result.wide.empty else [],
             "follow": _records(result.follow_through) if not result.follow_through.empty else [],
@@ -463,6 +469,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     </div>
     <div class="tab-group" role="tablist" aria-label="Daily views">
       <button role="tab" aria-selected="true" data-tab="best" class="on">🎯 Best Today</button>
+      <button role="tab" aria-selected="false" data-tab="jcurve">🚀 J-Curve</button>
       <button role="tab" aria-selected="false" data-tab="watchlist">📋 Watchlist</button>
       <button role="tab" aria-selected="false" data-tab="bullish">🟢 Bullish CPR</button>
       <button role="tab" aria-selected="false" data-tab="bearish">🔴 Bearish</button>
@@ -1074,8 +1081,8 @@ tr[data-symbol]:hover td { background: var(--card-hover); }
 JS = r"""
 let DATA = null;
 const PAYLOAD_URL = window.CPR_PAYLOAD_URL;
-const COLS = ["SYMBOL","DAY_CHG_PCT","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Risk_Multiplier","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
-const COMPACT_COLS = ["SYMBOL","DAY_CHG_PCT","Setup","Risk_Multiplier","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_Ratio","Industry"];
+const COLS = ["SYMBOL","DAY_CHG_PCT","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Risk_Multiplier","JCurve_Stage","JCurve_Score","JCurve_Explanation","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
+const COMPACT_COLS = ["SYMBOL","DAY_CHG_PCT","Setup","JCurve_Stage","Risk_Multiplier","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_Ratio","Industry"];
 const FOLLOW_COLS = ["SYMBOL","DAY_CHG_PCT","Industry","Setup","CPR_Width_Pct","Width_Rank_Pct","Segment","Next_Close","Follow_Through"];
 let tab = "best";
 let currentPreset = "all";
@@ -1393,6 +1400,7 @@ function downloads() {
     ["🚀 TradingView Charts (Interactive)", "cpr_tradingview_dashboard.html"],
     ["Full Universe CSV", d.full],
     ["Best Today Setups CSV", d.best],
+    ["J-Curve Setups CSV", d.jcurve],
     ["Complete Watchlist CSV", d.watchlist],
     ["Wide CPR CSV", d.wide],
     ["Narrow CPR CSV", d.narrow],
@@ -1410,8 +1418,9 @@ function fmt(col, val) {
   if (val === null || val === undefined) return "—";
   if (col === "DAY_CHG_PCT") return (Number(val) > 0 ? "+" : "") + Number(val).toFixed(2) + "%";
   if (col === "CPR_Width_Pct") return Number(val).toFixed(4) + "%";
-  if (col === "Width_Rank_Pct" || col === "Confluence_Score" || col === "Signal_Score") return Number(val).toFixed(2);
+  if (col === "Width_Rank_Pct" || col === "Confluence_Score" || col === "Signal_Score" || col === "JCurve_Score") return Number(val).toFixed(2);
   if (col === "Risk_Multiplier") return Number(val) > 0 ? Number(val).toFixed(1) + "R" : "0.0R";
+  if (col === "JCurve_Stage") return val === "Liftoff" ? "🚀 Liftoff" : (val === "Ready" ? "🪝 Ready" : "—");
   if (col === "Value_Ratio") return Number(val).toFixed(2);
   if (["CLOSE","Pivot","BC","TC","Value_60d","ATR14","Width_ATR","Next_Close"].includes(col)) return Number(val).toFixed(2);
   if (["Own_Narrow","Nifty500","Above_SMA50","Above_SMA100","History_OK"].includes(col)) return val ? "Yes" : "No";
@@ -1455,6 +1464,9 @@ function klass(col, val) {
   if (col === "Setup" && (val === "Long" || val === "Watch Long")) return "bull";
   if (col === "Setup" && (val === "Short" || val === "Watch Short")) return "bear";
   if (col === "Setup" && val === "Watch") return "narrow";
+  if (col === "JCurve_Stage" && val === "Liftoff") return "bull";
+  if (col === "JCurve_Stage" && val === "Ready") return "narrow";
+  if (col === "JCurve_Score" && Number(val) >= 75) return "bull";
   if (col === "Signal_Score" && Number(val) >= 65) return "bull";
   if (col === "Signal_Score" && Number(val) < 50) return "bear";
   if (col === "Strategy_Confirmation" && val === "Confirmed") return "bull";

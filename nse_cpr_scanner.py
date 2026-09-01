@@ -43,6 +43,7 @@ from cpr_contract import (
 from cpr_scoring import SCORE_FIELDS, attach_confirmation_score
 from wide_cpr_strategy import WIDE_FIELDS, attach_wide_strategy, wide_table
 from signal_contract import setup_score
+from jcurve_engine import attach_jcurve_strategy
 from cpr_parquet import cached_parquet_dates, load_history_panel_parquet, save_session_parquet
 
 OUTPUT_DIR = Path("cpr_output")
@@ -186,6 +187,9 @@ class ScanResult:
     follow_through: pd.DataFrame = field(default_factory=pd.DataFrame)
     wide: pd.DataFrame = field(default_factory=pd.DataFrame)
     bullish_bias: pd.DataFrame = field(default_factory=pd.DataFrame)
+    weekly_top20: pd.DataFrame = field(default_factory=pd.DataFrame)
+    monthly_top20: pd.DataFrame = field(default_factory=pd.DataFrame)
+    jcurve: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _nse_session() -> requests.Session:
@@ -1218,6 +1222,9 @@ DISPLAY_COLS = [
     "Virgin_CPR",
     "Triple_Confluence",
     "Risk_Multiplier",
+    "JCurve_Stage",
+    "JCurve_Score",
+    "JCurve_Explanation",
 ]
 
 WEB_EXPORT_COLS = [
@@ -1248,6 +1255,9 @@ WEB_EXPORT_COLS = [
     "Overlay",
     "Setup",
     "Risk_Multiplier",
+    "JCurve_Stage",
+    "JCurve_Score",
+    "JCurve_Explanation",
     "Bias",
     "Price_Position",
     "Segment",
@@ -1390,6 +1400,14 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         wide = pd.read_csv(wide_path)
     if wide.empty or not set(WIDE_FIELDS).issubset(wide.columns):
         wide = wide_table(full)
+    if "JCurve_Stage" not in full.columns:
+        full = attach_jcurve_strategy(full)
+    jcurve = pd.DataFrame()
+    jcurve_path = resolve_scan_csv("jcurve", date, output_dir)
+    if jcurve_path.exists():
+        jcurve = pd.read_csv(jcurve_path)
+    if jcurve.empty and "JCurve_Stage" in full.columns:
+        jcurve = full[full["JCurve_Stage"].isin(["Liftoff", "Ready"])].sort_values(["JCurve_Stage", "JCurve_Score"], ascending=[True, False]).reset_index(drop=True)
     result = ScanResult(
         date=date,
         cash_rows=len(full),
@@ -1404,6 +1422,7 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         watchlist=watchlist,
         wide=wide,
         bullish_bias=bullish_bias,
+        jcurve=jcurve,
     )
     weekly_path = resolve_scan_csv("weekly", date, output_dir)
     monthly_path = resolve_scan_csv("monthly", date, output_dir)
@@ -1986,6 +2005,10 @@ def export_results(
     wide_path = scan_csv_path("wide", date, output_dir)
     if not wide.empty:
         wide.to_csv(wide_path, index=False)
+    jcurve = df[df["JCurve_Stage"].isin(["Liftoff", "Ready"])].sort_values(["JCurve_Stage", "JCurve_Score"], ascending=[True, False]).reset_index(drop=True) if "JCurve_Stage" in df.columns else pd.DataFrame()
+    jcurve_path = scan_csv_path("jcurve", date, output_dir)
+    if not jcurve.empty:
+        jcurve.to_csv(jcurve_path, index=False)
     try:
         save_session_parquet(full_table, date, output_dir)
     except Exception:
@@ -2001,6 +2024,8 @@ def export_results(
         if not watchlist.empty:
             print(f"✓ Watchlist: {len(watchlist)} symbols → {watch_path}")
         print(f"✓ Wide CPR: {len(wide)} symbols → {wide_path}")
+        if not jcurve.empty:
+            print(f"✓ J-Curve Setups: {len(jcurve)} symbols → {jcurve_path}")
 
     return ScanResult(
         date=date,
@@ -2016,6 +2041,7 @@ def export_results(
         watchlist=watchlist,
         wide=wide,
         bullish_bias=bullish_bias,
+        jcurve=jcurve,
     )
 
 
@@ -2063,6 +2089,7 @@ def scan_eod_cpr(
             cash_df = attach_history_features(
                 cash_df, hist_panel, own_window=HISTORY_LOOKBACK
             )
+            cash_df = attach_jcurve_strategy(cash_df)
             setups = int((cash_df["Setup"].isin(["Long", "Short", "Watch"])).sum()) if "Setup" in cash_df.columns else 0
             own_n = int(cash_df["Own_Narrow"].sum()) if "Own_Narrow" in cash_df.columns else 0
             print(f"History features: Own_Narrow {own_n} | Setups {setups}")
