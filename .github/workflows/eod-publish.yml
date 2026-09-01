@@ -63,11 +63,11 @@ jobs:
           SITE_ONLY: ${{ inputs.site_only }}
         run: |
           if [ "${SITE_ONLY}" = "true" ]; then
-            python eod_publish.py --site-only --max-sessions 60
+            python eod_publish.py --site-only --max-sessions 20
           elif [ -n "${SCAN_DATE}" ]; then
-            python eod_publish.py "${SCAN_DATE}" --max-sessions 60
+            python eod_publish.py "${SCAN_DATE}" --max-sessions 20
           else
-            python eod_publish.py --max-sessions 60
+            python eod_publish.py --max-sessions 20
           fi
 
       - name: Validate publication contract

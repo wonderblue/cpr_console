@@ -35,7 +35,7 @@ from nse_cpr_scanner import (
 from publication_contract import read_manifest
 
 SITE_DIR = Path("site")
-DEFAULT_PUBLISHED_SESSIONS = 60
+DEFAULT_PUBLISHED_SESSIONS = 20
 ROUND_2 = {
     "OPEN",
     "HIGH",
