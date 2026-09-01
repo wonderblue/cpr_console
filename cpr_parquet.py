@@ -13,7 +13,10 @@ import re
 from pathlib import Path
 from typing import List, Optional, Union
 
-import duckdb
+try:
+    import duckdb
+except ImportError:
+    duckdb = None
 import pandas as pd
 
 DEFAULT_OUTPUT_DIR = Path("cpr_output")
@@ -88,6 +91,8 @@ def query_duckdb(
     params: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Execute a SQL query against the Parquet Lakehouse using DuckDB."""
+    if duckdb is None:
+        raise RuntimeError("duckdb is not installed")
     glob_path = get_parquet_glob(output_dir)
     sql_formatted = sql.replace("__PARQUET__", f"read_parquet('{glob_path}', hive_partitioning=1)")
     con = duckdb.connect(":memory:")
@@ -109,6 +114,8 @@ def compute_own_narrow_duckdb(
     Compute 60-day historical narrow rank and Own_Narrow flag using DuckDB.
     Returns None if insufficient Parquet history is available to trigger fallback.
     """
+    if duckdb is None:
+        return None
     root = Path(output_dir) if output_dir is not None else DEFAULT_OUTPUT_DIR
     parquet_root = root / PARQUET_SUBDIR
     if not parquet_root.exists():
@@ -217,6 +224,8 @@ def cached_parquet_dates(
     include_end_date: bool = True,
 ) -> List[str]:
     """Return available distinct session dates in the Parquet lakehouse <= end_date, ordered newest-to-oldest."""
+    if duckdb is None:
+        return []
     root = Path(output_dir) if output_dir is not None else DEFAULT_OUTPUT_DIR
     parquet_root = root / PARQUET_SUBDIR
     if not parquet_root.exists():
@@ -271,6 +280,8 @@ def load_history_panel_parquet(
     Load historical CPR panel from Parquet lakehouse for specified dates or ending at end_date.
     Returns a DataFrame conforming to load_history_panel contract with 'session' column and standard numeric types.
     """
+    if duckdb is None:
+        return pd.DataFrame()
     root = Path(output_dir) if output_dir is not None else DEFAULT_OUTPUT_DIR
     parquet_root = root / PARQUET_SUBDIR
     if not parquet_root.exists():

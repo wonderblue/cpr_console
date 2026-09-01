@@ -23,7 +23,15 @@ from cpr_parquet import (
     save_session_parquet,
 )
 
+try:
+    import duckdb
+    import pyarrow
+    HAS_PARQUET_DEPS = True
+except ImportError:
+    HAS_PARQUET_DEPS = False
 
+
+@unittest.skipUnless(HAS_PARQUET_DEPS, "pyarrow and duckdb required for Parquet tests")
 class TestCPRParquet(unittest.TestCase):
     def setUp(self):
         self.sample_df = pd.DataFrame({
