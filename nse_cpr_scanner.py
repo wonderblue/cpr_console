@@ -103,7 +103,7 @@ COLUMN_ALIASES = {
     "ISIN": "ISIN",
 }
 
-CASH_SERIES = ("EQ",)
+CASH_SERIES = ("EQ", "BE", "BZ")
 UNCLASSIFIED_INDUSTRY = "Unclassified"
 INDUSTRY_URL = "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
 INDUSTRY_CACHE = Path(__file__).resolve().parent / "universes" / "nifty500_industry.csv"

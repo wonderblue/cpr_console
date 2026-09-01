@@ -25,12 +25,12 @@ from nse_cpr_scanner import (
 def _udi_cash():
     return pd.DataFrame(
         {
-            "TckrSymb": ["AAA", "BBB", "CCC", "AAA"],
-            "SctySrs": ["EQ", "EQ", "BE", "EQ"],
-            "OpnPric": [100.0, 50.0, 10.0, 999.0],
-            "HghPric": [100.2, 55.0, 12.0, 999.0],
-            "LwPric": [100.0, 45.0, 9.0, 999.0],
-            "ClsPric": [100.15, 46.0, 11.0, 999.0],
+            "TckrSymb": ["AAA", "BBB", "CCC", "DDD", "AAA"],
+            "SctySrs": ["EQ", "EQ", "BE", "GS", "EQ"],
+            "OpnPric": [100.0, 50.0, 10.0, 100.0, 999.0],
+            "HghPric": [100.2, 55.0, 12.0, 101.0, 999.0],
+            "LwPric": [100.0, 45.0, 9.0, 99.0, 999.0],
+            "ClsPric": [100.15, 46.0, 11.0, 100.5, 999.0],
         }
     )
 
@@ -38,7 +38,7 @@ def _udi_cash():
 class TestNormalize(unittest.TestCase):
     def test_udi_columns_and_eq_filter(self):
         out = normalize_bhavcopy(_udi_cash(), cash_only=True)
-        self.assertListEqual(sorted(out["SYMBOL"].tolist()), ["AAA", "BBB"])
+        self.assertListEqual(sorted(out["SYMBOL"].tolist()), ["AAA", "BBB", "CCC"])
         self.assertIn("OPEN", out.columns)
         self.assertIn("HIGH", out.columns)
 
