@@ -43,6 +43,7 @@ from cpr_contract import (
 from cpr_scoring import SCORE_FIELDS, attach_confirmation_score
 from wide_cpr_strategy import WIDE_FIELDS, attach_wide_strategy, wide_table
 from signal_contract import setup_score
+from cpr_parquet import save_session_parquet
 
 OUTPUT_DIR = Path("cpr_output")
 IST = ZoneInfo("Asia/Kolkata")
@@ -1737,6 +1738,10 @@ def export_results(
     wide_path = scan_csv_path("wide", date, output_dir)
     if not wide.empty:
         wide.to_csv(wide_path, index=False)
+    try:
+        save_session_parquet(full_table, date, output_dir)
+    except Exception:
+        pass
     if verbose:
         print(f"✓ Full table: {paths['full']}")
         print(f"✓ Narrow CPR: {len(narrow)} symbols → {paths['narrow']}")
