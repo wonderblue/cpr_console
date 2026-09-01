@@ -215,7 +215,11 @@ with st.sidebar:
     setup_filter = st.selectbox("Setup", ["Any", "Long", "Short", "Watch Long", "Watch Short", "Watch", "No setup"], index=0)
     own_narrow_filter = st.selectbox("Own-history narrow", ["Any", "Yes", "No"], index=0)
     nifty_only = st.checkbox("Nifty 500 only", value=False)
-    hide_unclassified = st.checkbox("Hide Unclassified industry", value=False)
+    hide_unclassified = st.checkbox(
+        "Hide unclassified / Diversified",
+        value=False,
+        help="Hide stocks whose industry could not be determined (shows as 'Diversified').",
+    )
 
     st.caption(
         f"Absolute Narrow ≤ 0.25% · Own_Narrow = bottom 25% of that name’s last 60 sessions · "
@@ -291,7 +295,7 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     if nifty_only and "Nifty500" in view.columns:
         view = view[view["Nifty500"].astype(bool)]
     if hide_unclassified and "Industry" in view.columns:
-        view = view[view["Industry"] != "Unclassified"]
+        view = view[~view["Industry"].isin(["Unclassified", "Diversified"])]
     return view.reset_index(drop=True)
 
 

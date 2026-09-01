@@ -460,9 +460,36 @@ with st.expander("🔍 Screening Filters", expanded=True):
             index=0,
             help="Cash = not in NSE F&O lot list. F&O = derivatives underlyings."
         )
-    
+
+        # Industry filter — populated from nifty500_industry + eod2_sectors
+        _industry_opts = ["Any"]
+        try:
+            import pandas as _pd
+            from pathlib import Path as _Path
+            _ind_df = _pd.read_csv(_Path(__file__).resolve().parent / "universes" / "nifty500_industry.csv")
+            _eod2_df = _pd.read_csv(_Path(__file__).resolve().parent / "universes" / "eod2_sectors.csv")
+            _all_inds = sorted(
+                set(_ind_df["Industry"].dropna().astype(str).tolist())
+                | set(_eod2_df["Sector"].dropna().astype(str).tolist())
+            )
+            _industry_opts += _all_inds
+        except Exception:
+            pass
+        industry_filter = st.selectbox(
+            "Industry / Sector",
+            _industry_opts,
+            index=0,
+            help="Filter by NSE official industry (Nifty 500) or eod2 fine-grained sector.",
+        )
+        hide_diversified = st.checkbox(
+            "Hide Diversified / unknown",
+            value=False,
+            help="Hide stocks whose industry could not be determined.",
+        )
+
     with col4:
         st.markdown("**Liquidity Filters**")
+
         min_price = st.number_input(
             "Min Price",
             min_value=0.0,
@@ -597,11 +624,36 @@ def fetch_and_calculate_cpr(
             row = result.to_dict()
             row["Segment"] = classify_symbol(symbol)
             all_results.append(row)
-    
+
     # Create DataFrame
     df = pd.DataFrame(all_results)
-    
-    # Apply filters
+
+    # Attach Industry / Sector column from eod2 sector map
+    if not df.empty:
+        try:
+            _sec_map: Dict[str, str] = {}
+            _ind_path = os.path.join(os.path.dirname(__file__), "universes", "nifty500_industry.csv")
+            _eod2_path = os.path.join(os.path.dirname(__file__), "universes", "eod2_sectors.csv")
+            if os.path.exists(_ind_path):
+                _idf = pd.read_csv(_ind_path)
+                _sec_map.update({
+                    str(s).strip().upper(): str(i).strip()
+                    for s, i in zip(_idf["Symbol"], _idf["Industry"])
+                    if pd.notna(s) and pd.notna(i)
+                })
+            if os.path.exists(_eod2_path):
+                _sdf = pd.read_csv(_eod2_path)
+                for s, sec in zip(_sdf["Symbol"], _sdf["Sector"]):
+                    key = str(s).strip().upper()
+                    if pd.notna(s) and pd.notna(sec) and key not in _sec_map:
+                        _sec_map[key] = str(sec).strip()
+            if _sec_map:
+                _bare = df["Symbol"].str.upper().str.replace(r"\.NS$|\.BO$", "", regex=True)
+                df["Industry"] = _bare.map(_sec_map).fillna("Diversified")
+        except Exception:
+            pass
+
+    # Apply CPR filters
     filtered_df = cpr_engine.screen_dataframe(
         df,
         cpr_width_filter=cpr_width_filter,
@@ -614,8 +666,13 @@ def fetch_and_calculate_cpr(
     )
     if segment_filter != "Any" and filtered_df is not None and not filtered_df.empty and "Segment" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["Segment"] == segment_filter].reset_index(drop=True)
-    
+    if industry_filter != "Any" and filtered_df is not None and not filtered_df.empty and "Industry" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Industry"] == industry_filter].reset_index(drop=True)
+    if hide_diversified and filtered_df is not None and not filtered_df.empty and "Industry" in filtered_df.columns:
+        filtered_df = filtered_df[~filtered_df["Industry"].isin(["Diversified", "Unclassified"])].reset_index(drop=True)
+
     return df, filtered_df
+
 
 
 def apply_watchlist_filters(all_df: pd.DataFrame, cpr_engine: CPREngine) -> pd.DataFrame:
@@ -634,7 +691,12 @@ def apply_watchlist_filters(all_df: pd.DataFrame, cpr_engine: CPREngine) -> pd.D
     )
     if segment_filter != "Any" and filtered_df is not None and not filtered_df.empty and "Segment" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["Segment"] == segment_filter].reset_index(drop=True)
+    if industry_filter != "Any" and filtered_df is not None and not filtered_df.empty and "Industry" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Industry"] == industry_filter].reset_index(drop=True)
+    if hide_diversified and filtered_df is not None and not filtered_df.empty and "Industry" in filtered_df.columns:
+        filtered_df = filtered_df[~filtered_df["Industry"].isin(["Diversified", "Unclassified"])].reset_index(drop=True)
     return filtered_df
+
 
 
 # ============================================================================

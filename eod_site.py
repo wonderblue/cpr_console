@@ -322,7 +322,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
       <select id="columnMode"><option value="compact">Trader view</option><option value="research">Research view</option></select>
     </label>
     <label class="filter-check"><input id="niftyOnly" type="checkbox"/> Nifty 500</label>
-    <label class="filter-check"><input id="hideUnclassified" type="checkbox"/> Hide Unclassified</label>
+    <label class="filter-check"><input id="hideUnclassified" type="checkbox"/> Hide Unclassified / Diversified</label>
   </section>
   <p class="count" style="padding-top:0">
     CPR class is the band as % of close: Narrow ≤ 0.25%, Moderate 0.25–&lt;0.75%, Wide ≥ 0.75%.
@@ -379,7 +379,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
   </aside>
 
   <footer>
-    Equity stocks only (ETFs, AMCs, mutual funds excluded). Industry from Nifty 500.
+    Equity stocks only (ETFs, AMCs, mutual funds excluded). Industry from NSE Nifty 500 official list; non-Nifty-500 stocks use eod2 curated sector data or keyword heuristics.
     Built from NSE UDI cash + F&amp;O bhavcopy plus ~252 prior cash sessions.
     CPR = Pivot (H+L+C)/3, BC (H+L)/2, TC 2P−BC.
     Absolute Narrow ≤ 0.25%. Own_Narrow = bottom 25% of that name’s last 60 widths.
@@ -875,7 +875,7 @@ function rows() {
     if (ownNarrow === "Yes" && !r.Own_Narrow) return false;
     if (ownNarrow === "No" && r.Own_Narrow) return false;
     if (niftyOnly && r.Nifty500 !== true) return false;
-    if (hideUncl && r.Industry === "Unclassified") return false;
+    if (hideUncl && (r.Industry === "Unclassified" || r.Industry === "Diversified")) return false;
     return true;
   });
 }

@@ -106,6 +106,41 @@ CASH_SERIES = ("EQ",)
 UNCLASSIFIED_INDUSTRY = "Unclassified"
 INDUSTRY_URL = "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
 INDUSTRY_CACHE = Path(__file__).resolve().parent / "universes" / "nifty500_industry.csv"
+# eod2-curated fine-grained sector map (fallback for non-Nifty-500 symbols)
+SECTOR_CACHE = Path(__file__).resolve().parent / "universes" / "eod2_sectors.csv"
+
+# Keyword heuristics — used when symbol is not in SECTOR_CACHE either
+_KEYWORD_SECTORS: list[tuple[tuple[str, ...], str]] = [
+    (("BANK", "FINANCE", "FINANCIAL", "FINSERV", "NBFC", "HOUSING", "CREDIT", "SECURITIES"), "Financial Services"),
+    (("PHARMA", "DRUG", "HEALTH", "MEDIC", "BIO", "LAB", "HOSPITAL", "CLINIC", "DIAGN"), "Healthcare & Pharma"),
+    (("TECH", "SOFT", "INFO", "DIGITAL", "SOLUTION", "SYSTEM", "DATA", "CYBER"), "Information Technology"),
+    (("AUTO", "MOTOR", "TYRE", "WHEEL", "GEAR", "CLUTCH", "BRAKE", "ENGINE", "FORG"), "Automobile & Ancillary"),
+    (("STEEL", "IRON", "METAL", "ALUM", "COPPER", "ZINC", "MINING", "MINERAL"), "Metals & Mining"),
+    (("POWER", "SOLAR", "WIND", "RENEW"), "Power & Utilities"),
+    (("OIL", "GAS", "PETRO", "REFIN", "FUEL"), "Energy & Oil/Gas"),
+    (("CHEM", "ORGANIC", "SPECIALTY", "FERT", "AGRO", "PEST", "PIGMENT"), "Chemicals & Fertilizers"),
+    (("REALTY", "INFRA", "BUILD", "CONSTRUCT", "ESTATE", "DEVELOP", "PROP"), "Real Estate & Infra"),
+    (("TEXTILE", "FABRIC", "COTTON", "YARN", "SPIN", "GARMENT", "APPAREL", "WEAR"), "Textiles & Apparel"),
+    (("FOOD", "SUGAR", "TEA", "COFFEE", "BEVERAGE", "BREW", "DISTILL", "DAIRY"), "FMCG & Food Products"),
+    (("PAPER", "PACK", "PRINT", "CONTAINER"), "Paper & Packaging"),
+    (("CEMENT", "CERAMIC", "PIPE", "GLASS", "TILES"), "Building Materials"),
+    (("LOGISTIC", "TRANSPORT", "SHIPPING", "PORT", "FREIGHT", "EXPRESS", "CARGO"), "Logistics & Ports"),
+    (("MEDIA", "ENTERTAIN", "FILM", "BROADCAST", "CABLE"), "Media & Entertainment"),
+    (("RETAIL", "MART", "STORE", "JEWEL", "WATCH", "FASHION"), "Consumer & Retail"),
+    (("HOTEL", "RESORT", "TRAVEL", "TOUR", "RESTAUR", "HOSPITALITY"), "Hotels & Tourism"),
+    (("TELECOM", "COMMUNICATION", "TOWER", "ANTENNA"), "Telecommunications"),
+    (("DEFENCE", "DEFENSE", "ARMOUR", "WEAPON", "ORDNANCE"), "Aerospace & Defense"),
+    (("INSURANCE", "INSUR", "ASSURANCE"), "Insurance"),
+]
+
+
+def _classify_by_keyword(symbol: str) -> str:
+    """Classify a symbol using keyword heuristics. Returns a sector string."""
+    s = symbol.upper()
+    for keywords, sector in _KEYWORD_SECTORS:
+        if any(kw in s for kw in keywords):
+            return sector
+    return "Diversified"
 HISTORY_LOOKBACK = 60
 HISTORY_LOOKBACK_HTF = 252
 OWN_NARROW_QUANTILE = 0.25
@@ -240,8 +275,30 @@ def keep_listed_equity(df: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
     return kept.reset_index(drop=True)
 
 
+def load_sector_map() -> dict:
+    """Symbol → fine-grained sector from universes/eod2_sectors.csv (eod2 curated data)."""
+    if not SECTOR_CACHE.exists():
+        return {}
+    try:
+        df = pd.read_csv(SECTOR_CACHE)
+        if "Symbol" in df.columns and "Sector" in df.columns:
+            return {
+                str(sym).strip().upper(): str(sec).strip()
+                for sym, sec in zip(df["Symbol"], df["Sector"])
+                if pd.notna(sym) and pd.notna(sec)
+            }
+    except Exception as exc:
+        print(f"Could not load eod2 sector map: {exc}")
+    return {}
+
+
 def load_industry_map(session: Optional[requests.Session] = None, fetch: bool = True) -> dict:
-    """Symbol → NSE Indices industry (Nifty 500 list). Cache under universes/."""
+    """Symbol → NSE Indices industry (Nifty 500 list). Cache under universes/.
+
+    Returns the Nifty-500 official industry mapping. Non-Nifty-500 symbols
+    will still be "Unclassified" here; use ``attach_industry()`` which applies
+    the eod2 sector fallback for those.
+    """
     if INDUSTRY_CACHE.exists():
         cached = pd.read_csv(INDUSTRY_CACHE)
         if "Symbol" in cached.columns and "Industry" in cached.columns:
@@ -281,12 +338,40 @@ def load_industry_map(session: Optional[requests.Session] = None, fetch: bool = 
 
 
 def attach_industry(df: pd.DataFrame, mapping: Optional[dict] = None, fetch: bool = True) -> pd.DataFrame:
-    """Join Nifty 500 industry. Names outside that list are Unclassified."""
+    """Join Nifty 500 industry.
+
+    For symbols inside Nifty 500 the official NSE industry label is used.
+    For symbols outside Nifty 500 (currently "Unclassified") the eod2
+    curated sector map is tried first, then keyword heuristics, so no stock
+    is left as "Unclassified" unnecessarily.
+    """
     out = df.copy()
+    # Nifty-500 official industry
     mapping = mapping if mapping is not None else load_industry_map(fetch=fetch)
-    out["Industry"] = out["SYMBOL"].map(mapping).fillna(UNCLASSIFIED_INDUSTRY)
-    out["Nifty500"] = out["Industry"] != UNCLASSIFIED_INDUSTRY
+    out["Industry"] = out["SYMBOL"].map(mapping)
+    # Ensure object dtype so string fills work correctly
+    out["Industry"] = out["Industry"].astype(object)
+    out["Nifty500"] = out["Industry"].notna()
+
+    # For non-Nifty-500 symbols apply eod2 sector as fallback
+    unclassified_mask = out["Industry"].isna()
+    if unclassified_mask.any():
+        sector_map = load_sector_map()
+        # Priority 1: eod2 curated sectors
+        eod2_fill = out.loc[unclassified_mask, "SYMBOL"].map(sector_map).astype(object)
+        # Priority 2: keyword heuristics for remaining unknowns
+        still_missing = eod2_fill.isna()
+        if still_missing.any():
+            keyword_fill = out.loc[unclassified_mask & still_missing, "SYMBOL"].apply(_classify_by_keyword)
+            eod2_fill = eod2_fill.copy()
+            eod2_fill[still_missing] = keyword_fill.values
+        out.loc[unclassified_mask, "Industry"] = eod2_fill.values
+
+    # Final safety net: anything still NaN → "Diversified"
+    out["Industry"] = out["Industry"].fillna("Diversified")
     return out
+
+
 
 
 def cpr_overlay(today_top, today_bot, prior_top, prior_bot) -> str:
