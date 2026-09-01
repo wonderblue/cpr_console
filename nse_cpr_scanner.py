@@ -1427,11 +1427,12 @@ def compute_best(df: pd.DataFrame, n: int = 25) -> pd.DataFrame:
         return pd.DataFrame(columns=cols)
     setup_rows = df[df["Setup"].isin(["Long", "Short"])].copy()
     if setup_rows.empty:
-        return pd.DataFrame(columns=cols)
-    liquid = _liquid_enough(setup_rows).reindex(setup_rows.index).fillna(False)
-    setup_rows = setup_rows.loc[liquid]
+        setup_rows = df[df["Setup"].isin(["Watch Long", "Watch Short", "Watch"])].copy()
     if setup_rows.empty:
         return pd.DataFrame(columns=cols)
+    liquid = _liquid_enough(setup_rows).reindex(setup_rows.index).fillna(False)
+    if liquid.any():
+        setup_rows = setup_rows.loc[liquid]
     sort_by = "Signal_Score" if "Signal_Score" in setup_rows.columns else ("Confluence_Score" if "Confluence_Score" in setup_rows.columns else "Width_Rank_Pct")
     extra = []
     if sort_by in setup_rows.columns:

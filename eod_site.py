@@ -1292,7 +1292,7 @@ function metrics() {
       const action = pill.dataset.metric;
       if (action === "narrow") { $("klass").value = "Narrow"; selectTab("narrow"); }
       else if (action === "bullish") { selectTab("bullish"); }
-      else if (action === "setups") { selectTab("best"); }
+      else if (action === "setups") { selectTab("watchlist"); }
       else if (action === "fo") { $("segment").value = "F&O + Cash"; render(); }
       else if (action === "all") { $("segment").value = "Any"; selectTab("full"); }
     });
@@ -1554,9 +1554,11 @@ function openDrawer(row, trigger) {
   const confirmation = row.Strategy_Confirmation;
   const squeezeBadge = row.NR7 ? "⚡ NR7 Squeeze" : (row.NR4 ? "⚡ NR4 Squeeze" : "Standard");
   const virginBadge = row.Virgin_CPR && row.Virgin_CPR !== "None" ? `✨ ${row.Virgin_CPR}` : "Standard";
+  const stratLabel = row.Strategy_Setup ? `${row.Strategy_Type || 'CPR'} · ${row.Strategy_Setup}` : (row.Strategy_Type || 'Standard');
   $("drawerBody").innerHTML = `
     <section class="drawer-section drawer-summary">
-      <div class="detail-item"><span>Setup Confirmation</span><strong>${badgeHtml(confirmation)}</strong></div>
+      <div class="detail-item"><span>Narrow CPR Setup</span><strong>${badgeHtml(row.Setup || 'No setup')}</strong></div>
+      <div class="detail-item"><span>Wide Strategy</span><strong>${esc(stratLabel)} ${confirmation ? badgeHtml(confirmation) : ''}</strong></div>
       <div class="detail-item"><span>Confluence Score</span><strong style="color:var(--accent);font-size:16px;">${esc(row.Confluence_Score || '0')} / 6</strong></div>
     </section>
     <section class="drawer-section">
@@ -1660,9 +1662,11 @@ function render() {
   if (!data.length) {
     const watchCount = (DATA.tables.watchlist || []).length;
     guide.innerHTML = tab === "best"
-      ? `No confirmed Long/Short setups for this session. ${watchCount} watchlist candidate${watchCount === 1 ? "" : "s"} available.<button class="btn btn-primary" type="button" data-empty-tab="watchlist">Open Watchlist</button>`
-      : "No rows match this view and the current filters. Clear filters or choose another view.";
+      ? `No confirmed Long/Short setups for this session. ${watchCount} watchlist candidate${watchCount === 1 ? "" : "s"} available. <button class="btn btn-primary" type="button" data-empty-tab="watchlist">Open Watchlist</button> <button class="btn btn-secondary" type="button" id="btnResetEmpty">Reset Filters</button>`
+      : `No rows match this view and current filters. <button class="btn btn-secondary" type="button" id="btnResetEmpty">Reset Filters</button>`;
     guide.querySelectorAll("[data-empty-tab]").forEach(button => button.addEventListener("click", () => selectTab(button.dataset.emptyTab)));
+    const btnR = $("btnResetEmpty");
+    if (btnR) btnR.addEventListener("click", resetFilters);
   }
   $("head").innerHTML = "<tr>" + cols.map(c =>
     `<th data-col="${c}" class="${sort.col===c?(sort.asc?'sorted asc':'sorted desc'):''}">${c.replaceAll("_"," ")}${sort.col===c?(sort.asc?' ▲':' ▼'):''}</th>`
@@ -1692,6 +1696,12 @@ function selectTab(nextTab) {
   selected.classList.add("on");
   selected.setAttribute("aria-selected", "true");
   tab = nextTab;
+  if (nextTab === "full") {
+    currentPreset = "all";
+    document.querySelectorAll(".strategy-pills .pill").forEach(p => p.classList.remove("active"));
+    const allPill = document.querySelector('.pill[data-preset="all"]');
+    if (allPill) allPill.classList.add("active");
+  }
   render();
 }
 
