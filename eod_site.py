@@ -51,9 +51,11 @@ ROUND_2 = {
     "SMA50",
     "SMA100",
     "Next_Close",
+    "DAY_CHG_PCT",
 }
 TABLE_COLS = [
     "SYMBOL",
+    "DAY_CHG_PCT",
     "NAME",
     "Industry",
     "OPEN",
@@ -209,6 +211,22 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
         regimes = result.full["Regime"].dropna().astype(str)
         if not regimes.empty:
             regime = regimes.value_counts().idxmax()
+    # Top 25 Gainers & Top 25 Losers
+    df_movers = result.full.copy()
+    if "PREVCLOSE" in df_movers.columns and "CLOSE" in df_movers.columns:
+        prev_c = pd.to_numeric(df_movers["PREVCLOSE"], errors="coerce")
+        close_c = pd.to_numeric(df_movers["CLOSE"], errors="coerce")
+        df_movers["DAY_CHG_PCT"] = ((close_c - prev_c) / prev_c * 100).round(2)
+    elif "OPEN" in df_movers.columns and "CLOSE" in df_movers.columns:
+        op = pd.to_numeric(df_movers["OPEN"], errors="coerce")
+        close_c = pd.to_numeric(df_movers["CLOSE"], errors="coerce")
+        df_movers["DAY_CHG_PCT"] = ((close_c - op) / op * 100).round(2)
+    else:
+        df_movers["DAY_CHG_PCT"] = 0.0
+
+    gainers_df = df_movers.sort_values("DAY_CHG_PCT", ascending=False).head(25)
+    losers_df = df_movers.sort_values("DAY_CHG_PCT", ascending=True).head(25)
+
     return {
         "date": result.date,
         "label": _date_label(result.date),
@@ -234,6 +252,8 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
         "publication": publication or {},
         "tables": {
             "full": _records(result.full),
+            "gainers": _records(gainers_df),
+            "losers": _records(losers_df),
             "narrow": _records(result.narrow),
             "bullish": _records(result.bullish),
             "bullish_bias": _records(result.bullish_bias),
@@ -408,6 +428,10 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
 
   <!-- Navigation View Tabs -->
   <nav class="tabs" id="tabs" aria-label="Data views">
+    <div class="tab-group" role="tablist" aria-label="Movers views">
+      <button role="tab" aria-selected="false" data-tab="gainers">🚀 Top 25 Gainers</button>
+      <button role="tab" aria-selected="false" data-tab="losers">📉 Top 25 Losers</button>
+    </div>
     <div class="tab-group" role="tablist" aria-label="Daily views">
       <button role="tab" aria-selected="true" data-tab="best" class="on">🎯 Best Today</button>
       <button role="tab" aria-selected="false" data-tab="watchlist">📋 Watchlist</button>
@@ -1019,9 +1043,9 @@ tr[data-symbol]:hover td { background: var(--card-hover); }
 JS = r"""
 let DATA = null;
 const PAYLOAD_URL = window.CPR_PAYLOAD_URL;
-const COLS = ["SYMBOL","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
-const COMPACT_COLS = ["SYMBOL","Setup","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_60d","Industry"];
-const FOLLOW_COLS = ["SYMBOL","Industry","Setup","CPR_Width_Pct","Width_Rank_Pct","Segment","Next_Close","Follow_Through"];
+const COLS = ["SYMBOL","DAY_CHG_PCT","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
+const COMPACT_COLS = ["SYMBOL","DAY_CHG_PCT","Setup","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_Ratio","Industry"];
+const FOLLOW_COLS = ["SYMBOL","DAY_CHG_PCT","Industry","Setup","CPR_Width_Pct","Width_Rank_Pct","Segment","Next_Close","Follow_Through"];
 let tab = "best";
 let currentPreset = "all";
 let sort = {col: null, asc: true};
@@ -1310,6 +1334,28 @@ function publicationStatus() {
   if (freshness.status !== "known") el.style.borderColor = "var(--bear)";
 }
 
+function buildCopyList() {
+  const data = sortRows(rows());
+  return data
+    .map(r => r.SYMBOL)
+    .filter(Boolean)
+    .map(s => `NSE:${String(s).replace(/\.NS$/i, "")}`)
+    .join(", ");
+}
+
+function copyWatchlist() {
+  const list = buildCopyList();
+  if (!list) {
+    showToast("No symbols in current view to copy.");
+    return;
+  }
+  navigator.clipboard.writeText(list).then(() => {
+    showToast(`✓ Copied ${list.split(",").length} TradingView symbols!`);
+  }).catch(() => {
+    showToast("Failed to copy symbols to clipboard.");
+  });
+}
+
 function downloads() {
   const d = DATA.downloads;
   $("downloads").innerHTML = [
@@ -1331,6 +1377,7 @@ function downloads() {
 
 function fmt(col, val) {
   if (val === null || val === undefined) return "—";
+  if (col === "DAY_CHG_PCT") return (Number(val) > 0 ? "+" : "") + Number(val).toFixed(2) + "%";
   if (col === "CPR_Width_Pct") return Number(val).toFixed(4) + "%";
   if (col === "Width_Rank_Pct" || col === "Confluence_Score" || col === "Signal_Score") return Number(val).toFixed(2);
   if (col === "Value_Ratio") return Number(val).toFixed(2);
@@ -1364,6 +1411,8 @@ function cellHtml(col, val, row) {
 }
 
 function klass(col, val) {
+  if (col === "DAY_CHG_PCT" && Number(val) > 0) return "bull";
+  if (col === "DAY_CHG_PCT" && Number(val) < 0) return "bear";
   if (col === "Bias" && val === "Bullish") return "bull";
   if (col === "Bias" && val === "Bearish") return "bear";
   if (col === "Price_Position" && val === "Above CPR") return "bull";
@@ -1647,6 +1696,8 @@ function render() {
   if (tab === "weekly" && htf.weekly_applies) extra = ` · applies to ${htf.weekly_applies}`;
   if (tab === "monthly" && htf.monthly_applies) extra = ` · applies to ${htf.monthly_applies}`;
   if (tab === "follow") extra = " · prior-day setups vs this session's close";
+  if (tab === "gainers") extra = " · Top 25 outperforming stocks ranked by % gain";
+  if (tab === "losers") extra = " · Top 25 underperforming stocks ranked by % loss";
   if (tab === "watchlist") extra = " · every setup with levels to trade next session";
   if (tab === "best") extra = " · Daily Long/Short ranked by confluence, liquid, F&O first";
   if (tab === "mylist") extra = " · symbols saved in this browser";

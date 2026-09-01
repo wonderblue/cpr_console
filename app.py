@@ -827,77 +827,105 @@ else:
 
         st.divider()
 
-        st.subheader("📋 Live CPR watchlist")
-        st.caption("Cached scan — change filters instantly. Click Refresh Data to download new quotes.")
-        if filtered_df is not None and not filtered_df.empty:
-            display_df = filtered_df.copy()
-            numeric_cols = ['Current Price', 'Day Open', 'Previous Close', 'CPR Bottom', 'Pivot', 'CPR Top', 'CPR Width', 'Width %', 'Dist from Pivot %']
-            for col in numeric_cols:
-                if col in display_df.columns:
-                    display_df[col] = display_df[col].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "N/A")
+        tab_watch, tab_movers = st.tabs(["📋 Live CPR Watchlist", "🚀 Top 25 Movers & CPR Breakdown"])
+        
+        with tab_watch:
+            st.subheader("📋 Live CPR watchlist")
+            st.caption("Cached scan — change filters instantly. Click Refresh Data to download new quotes.")
+            if filtered_df is not None and not filtered_df.empty:
+                display_df = filtered_df.copy()
+                numeric_cols = ['Current Price', 'Day Open', 'Previous Close', 'CPR Bottom', 'Pivot', 'CPR Top', 'CPR Width', 'Width %', 'Dist from Pivot %']
+                for col in numeric_cols:
+                    if col in display_df.columns:
+                        display_df[col] = display_df[col].apply(lambda x: f"{x:.3f}" if pd.notna(x) else "N/A")
 
-            def color_bias(val):
-                if val == "Bullish":
-                    return "color: green"
-                elif val == "Bearish":
-                    return "color: red"
-                return ""
+                def color_bias(val):
+                    if val == "Bullish":
+                        return "color: green"
+                    elif val == "Bearish":
+                        return "color: red"
+                    return ""
 
-            def color_position(val):
-                if val == "Above CPR":
-                    return "color: green"
-                elif val == "Below CPR":
-                    return "color: red"
-                elif val == "Inside CPR":
-                    return "color: orange"
-                return ""
+                def color_position(val):
+                    if val == "Above CPR":
+                        return "color: green"
+                    elif val == "Below CPR":
+                        return "color: red"
+                    elif val == "Inside CPR":
+                        return "color: orange"
+                    return ""
 
-            def color_virgin(val):
-                if val in ["Bullish Virgin", "Bearish Virgin"]:
-                    return "color: green"
-                elif val == "Developing":
-                    return "color: orange"
-                return ""
+                def color_virgin(val):
+                    if val in ["Bullish Virgin", "Bearish Virgin"]:
+                        return "color: green"
+                    elif val == "Developing":
+                        return "color: orange"
+                    return ""
 
-            def color_overlay(val):
-                if val == "Higher CPR":
-                    return "color: green"
-                elif val == "Lower CPR":
-                    return "color: red"
-                return ""
+                def color_overlay(val):
+                    if val == "Higher CPR":
+                        return "color: green"
+                    elif val == "Lower CPR":
+                        return "color: red"
+                    return ""
 
-            def color_segment(val):
-                if val == "Cash":
-                    return "color: #1565c0"
-                elif val == "F&O":
-                    return "color: #6a1b9a"
-                return ""
+                def color_segment(val):
+                    if val == "Cash":
+                        return "color: #1565c0"
+                    elif val == "F&O":
+                        return "color: #6a1b9a"
+                    return ""
 
-            styled_df = display_df.style
-            if 'Bias' in display_df.columns:
-                styled_df = styled_df.map(color_bias, subset=['Bias'])
-            if 'Position' in display_df.columns:
-                styled_df = styled_df.map(color_position, subset=['Position'])
-            if 'Virgin CPR' in display_df.columns:
-                styled_df = styled_df.map(color_virgin, subset=['Virgin CPR'])
-            if 'Overlay' in display_df.columns:
-                styled_df = styled_df.map(color_overlay, subset=['Overlay'])
-            if 'Segment' in display_df.columns:
-                styled_df = styled_df.map(color_segment, subset=['Segment'])
+                styled_df = display_df.style
+                if 'Bias' in display_df.columns:
+                    styled_df = styled_df.map(color_bias, subset=['Bias'])
+                if 'Position' in display_df.columns:
+                    styled_df = styled_df.map(color_position, subset=['Position'])
+                if 'Virgin CPR' in display_df.columns:
+                    styled_df = styled_df.map(color_virgin, subset=['Virgin CPR'])
+                if 'Overlay' in display_df.columns:
+                    styled_df = styled_df.map(color_overlay, subset=['Overlay'])
+                if 'Segment' in display_df.columns:
+                    styled_df = styled_df.map(color_segment, subset=['Segment'])
 
-            st.dataframe(styled_df, use_container_width=True, height=400)
+                st.dataframe(styled_df, use_container_width=True, height=400)
 
-            csv_buffer = io.StringIO()
-            display_df.to_csv(csv_buffer, index=False)
-            st.download_button(
-                label="📥 Download Results (CSV)",
-                data=csv_buffer.getvalue().encode('utf-8'),
-                file_name=f"cpr_screen_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        else:
-            st.info("ℹ️ No symbols match the current filters. Try relaxing the filter criteria.")
+                csv_buffer = io.StringIO()
+                display_df.to_csv(csv_buffer, index=False)
+                st.download_button(
+                    label="📥 Download Results (CSV)",
+                    data=csv_buffer.getvalue().encode('utf-8'),
+                    file_name=f"cpr_screen_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.info("ℹ️ No symbols match the current filters. Try relaxing the filter criteria.")
+
+        with tab_movers:
+            st.subheader("🚀 Top 25 Movers vs CPR Analysis")
+            st.caption("Analyze how today's biggest market movers correlate with CPR width, overlays, and price positions.")
+            if all_results_df is not None and not all_results_df.empty:
+                df_m = all_results_df.copy()
+                if 'Current Price' in df_m.columns and 'Previous Close' in df_m.columns:
+                    cp = pd.to_numeric(df_m['Current Price'], errors='coerce')
+                    pc = pd.to_numeric(df_m['Previous Close'], errors='coerce')
+                    df_m['Day Change %'] = ((cp - pc) / pc * 100).round(2)
+                    
+                    gainers_25 = df_m.sort_values('Day Change %', ascending=False).head(25)
+                    losers_25 = df_m.sort_values('Day Change %', ascending=True).head(25)
+                    
+                    show_cols = [c for c in ['Symbol', 'Current Price', 'Day Change %', 'CPR Width', 'Width %', 'Bias', 'Position', 'Overlay', 'Segment'] if c in df_m.columns]
+                    
+                    col_g, col_l = st.columns(2)
+                    with col_g:
+                        st.markdown("### 🟢 Top 25 Outperformers (Gainers)")
+                        st.dataframe(gainers_25[show_cols], use_container_width=True)
+                    with col_l:
+                        st.markdown("### 🔴 Top 25 Underperformers (Losers)")
+                        st.dataframe(losers_25[show_cols], use_container_width=True)
+            else:
+                st.info("ℹ️ Scan data not yet loaded. Please click Refresh Data to populate movers.")
 
         st.divider()
         with st.expander("📖 Methodology & Formulas"):
