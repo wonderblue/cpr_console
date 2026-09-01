@@ -13,7 +13,9 @@ import pandas as pd
 
 from cpr_parquet import (
     backfill_csv_to_parquet,
+    cached_parquet_dates,
     compute_own_narrow_duckdb,
+    load_history_panel_parquet,
     load_session_parquet,
     parquet_partition_dir,
     parquet_session_path,
@@ -105,6 +107,32 @@ class TestCPRParquet(unittest.TestCase):
             self.assertTrue(bool(rel_row["NR4"]))
             self.assertTrue(bool(rel_row["NR7"]))
             self.assertTrue(bool(rel_row["Own_Narrow"]))
+
+
+    def test_cached_parquet_dates_and_load_panel(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            for i in range(1, 6):
+                d = f"202608{i:02d}"
+                df = self.sample_df.copy()
+                df["OPEN"] = 100.0 * i
+                df["HIGH"] = 110.0 * i
+                df["LOW"] = 90.0 * i
+                df["VOLUME"] = 1000 * i
+                df["VALUE"] = 100000 * i
+                save_session_parquet(df, d, tmp_path)
+
+            dates = cached_parquet_dates("20260805", lookback=3, output_dir=tmp_path)
+            self.assertEqual(dates, ["20260805", "20260804", "20260803"])
+
+            panel_df = load_history_panel_parquet(end_date="20260805", lookback=3, output_dir=tmp_path)
+            self.assertEqual(len(panel_df), 9)  # 3 symbols * 3 dates
+            self.assertIn("session", panel_df.columns)
+            self.assertIn("Pivot", panel_df.columns)
+            self.assertIn("CPR_Top", panel_df.columns)
+            self.assertIn("CPR_Bottom", panel_df.columns)
+            self.assertIn("CPR_Width_Pct", panel_df.columns)
+            self.assertEqual(sorted(panel_df["session"].unique().tolist()), ["20260803", "20260804", "20260805"])
 
 
 if __name__ == "__main__":

@@ -38,6 +38,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Cache Bhavcopy History
+        uses: actions/cache@v4
+        with:
+          path: cpr_output/bhavcopy
+          key: bhavcopy-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            bhavcopy-${{ runner.os }}-
 
       - name: Install dependencies
         run: |

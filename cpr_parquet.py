@@ -210,6 +210,144 @@ def compute_own_narrow_duckdb(
         con.close()
 
 
+def cached_parquet_dates(
+    end_date: str,
+    lookback: int = 252,
+    output_dir: Optional[Union[str, Path]] = None,
+    include_end_date: bool = True,
+) -> List[str]:
+    """Return available distinct session dates in the Parquet lakehouse <= end_date, ordered newest-to-oldest."""
+    root = Path(output_dir) if output_dir is not None else DEFAULT_OUTPUT_DIR
+    parquet_root = root / PARQUET_SUBDIR
+    if not parquet_root.exists():
+        return []
+    glob_path = get_parquet_glob(output_dir)
+    op = "<=" if include_end_date else "<"
+    sql = f"""
+    SELECT DISTINCT Date 
+    FROM read_parquet('{glob_path}', hive_partitioning=1) 
+    WHERE Date {op} ?
+    ORDER BY Date DESC 
+    LIMIT ?
+    """
+    con = duckdb.connect(":memory:")
+    try:
+        df = con.execute(sql, [end_date, lookback]).df()
+        if df.empty or "Date" not in df.columns:
+            return []
+        return list(df["Date"])
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
+STRING_PANEL_COLS = ("NAME", "Industry", "Segment", "CPR_Class", "Bias", "Price_Position")
+NUM_PANEL_COLS = (
+    "OPEN",
+    "HIGH",
+    "LOW",
+    "CLOSE",
+    "VOLUME",
+    "VALUE",
+    "Pivot",
+    "BC",
+    "TC",
+    "CPR_Top",
+    "CPR_Bottom",
+    "CPR_Width",
+    "CPR_Width_Pct",
+)
+
+
+def load_history_panel_parquet(
+    dates: Optional[List[str]] = None,
+    end_date: Optional[str] = None,
+    lookback: int = 252,
+    output_dir: Optional[Union[str, Path]] = None,
+    include_end_date: bool = True,
+) -> pd.DataFrame:
+    """
+    Load historical CPR panel from Parquet lakehouse for specified dates or ending at end_date.
+    Returns a DataFrame conforming to load_history_panel contract with 'session' column and standard numeric types.
+    """
+    root = Path(output_dir) if output_dir is not None else DEFAULT_OUTPUT_DIR
+    parquet_root = root / PARQUET_SUBDIR
+    if not parquet_root.exists():
+        return pd.DataFrame()
+
+    glob_path = get_parquet_glob(output_dir)
+    con = duckdb.connect(":memory:")
+    try:
+        cols_df = con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{glob_path}', hive_partitioning=1, union_by_name=1) LIMIT 0"
+        ).df()
+        existing_cols = set(cols_df["column_name"].tolist())
+
+        select_exprs = ["Date AS session", "CAST(SYMBOL AS VARCHAR) AS SYMBOL"]
+        for col in STRING_PANEL_COLS:
+            if col in existing_cols:
+                select_exprs.append(f'CAST(COALESCE("{col}", \'\') AS VARCHAR) AS "{col}"')
+            else:
+                select_exprs.append(f'\'\' AS "{col}"')
+        for col in NUM_PANEL_COLS:
+            if col in existing_cols:
+                select_exprs.append(f'CAST("{col}" AS DOUBLE) AS "{col}"')
+            else:
+                select_exprs.append(f'CAST(NULL AS DOUBLE) AS "{col}"')
+
+        cols_sql = ",\n                ".join(select_exprs)
+
+        if dates is not None:
+            if not dates:
+                return pd.DataFrame()
+            dates_list = list(dates)
+            placeholders = ", ".join(["?"] * len(dates_list))
+            sql = f"""
+            SELECT 
+                {cols_sql}
+            FROM read_parquet('{glob_path}', hive_partitioning=1, union_by_name=1)
+            WHERE Date IN ({placeholders})
+            ORDER BY Date ASC, SYMBOL ASC
+            """
+            df = con.execute(sql, dates_list).df()
+        elif end_date is not None:
+            op = "<=" if include_end_date else "<"
+            sql = f"""
+            WITH recent_dates AS (
+                SELECT DISTINCT Date 
+                FROM read_parquet('{glob_path}', hive_partitioning=1) 
+                WHERE Date {op} ?
+                ORDER BY Date DESC 
+                LIMIT ?
+            )
+            SELECT 
+                {cols_sql}
+            FROM read_parquet('{glob_path}', hive_partitioning=1, union_by_name=1)
+            WHERE Date IN (SELECT Date FROM recent_dates)
+            ORDER BY Date ASC, SYMBOL ASC
+            """
+            df = con.execute(sql, [end_date, lookback]).df()
+        else:
+            return pd.DataFrame()
+
+        if df.empty:
+            return pd.DataFrame()
+
+        # Enforce standard pandas types
+        for num_col in NUM_PANEL_COLS:
+            if num_col in df.columns:
+                df[num_col] = pd.to_numeric(df[num_col], errors="coerce")
+
+        df["session"] = df["session"].astype(str)
+        df["SYMBOL"] = df["SYMBOL"].astype(str).str.strip().str.upper()
+        return df
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        con.close()
+
+
 def backfill_csv_to_parquet(
     output_dir: Optional[Union[str, Path]] = None,
     verbose: bool = True,
@@ -252,3 +390,4 @@ def backfill_csv_to_parquet(
 
 if __name__ == "__main__":
     backfill_csv_to_parquet()
+

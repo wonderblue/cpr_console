@@ -43,7 +43,7 @@ from cpr_contract import (
 from cpr_scoring import SCORE_FIELDS, attach_confirmation_score
 from wide_cpr_strategy import WIDE_FIELDS, attach_wide_strategy, wide_table
 from signal_contract import setup_score
-from cpr_parquet import save_session_parquet
+from cpr_parquet import cached_parquet_dates, load_history_panel_parquet, save_session_parquet
 
 OUTPUT_DIR = Path("cpr_output")
 IST = ZoneInfo("Asia/Kolkata")
@@ -466,6 +466,9 @@ def seed_bhavcopy_cache(df: pd.DataFrame, date: str, output_dir: Optional[Path] 
 
 
 def cached_history_dates(end_date: str, output_dir: Optional[Path] = None, lookback: int = HISTORY_LOOKBACK_HTF) -> List[str]:
+    pq_dates = cached_parquet_dates(end_date, lookback=lookback, output_dir=output_dir, include_end_date=True)
+    if pq_dates and len(pq_dates) >= min(lookback, MIN_HISTORY_DAYS):
+        return pq_dates
     cache = bhavcopy_cache_dir(output_dir)
     got: List[str] = []
     for date in session_date_window(end_date, lookback):
@@ -478,6 +481,10 @@ def cached_history_dates(end_date: str, output_dir: Optional[Path] = None, lookb
 
 
 def load_history_panel(dates: List[str], output_dir: Optional[Path] = None) -> pd.DataFrame:
+    if dates:
+        pq_df = load_history_panel_parquet(dates=dates, output_dir=output_dir)
+        if not pq_df.empty and pq_df["session"].nunique() >= min(len(dates), MIN_HISTORY_DAYS):
+            return pq_df
     cache = bhavcopy_cache_dir(output_dir)
     frames = []
     for date in dates:
@@ -1857,11 +1864,18 @@ def scan_eod_cpr(
 
         seed_bhavcopy_cache(cash_df, date, output_dir=output_dir)
         if lookback and lookback > 0:
-            hist_dates = ensure_bhavcopy_history(
-                date, lookback=lookback, output_dir=output_dir, session=session
-            )
+            pq_dates = cached_parquet_dates(date, lookback=lookback, output_dir=output_dir, include_end_date=False)
+            if len(pq_dates) >= min(int(lookback * 0.8), MIN_HISTORY_DAYS):
+                hist_panel = load_history_panel_parquet(dates=pq_dates, output_dir=output_dir)
+                print(f"History panel: {len(pq_dates)} sessions loaded from Parquet lakehouse")
+            else:
+                hist_dates = ensure_bhavcopy_history(
+                    date, lookback=lookback, output_dir=output_dir, session=session
+                )
+                hist_panel = load_history_panel(hist_dates, output_dir)
+
             cash_df = attach_history_features(
-                cash_df, load_history_panel(hist_dates, output_dir), own_window=HISTORY_LOOKBACK
+                cash_df, hist_panel, own_window=HISTORY_LOOKBACK
             )
             setups = int((cash_df["Setup"].isin(["Long", "Short", "Watch"])).sum()) if "Setup" in cash_df.columns else 0
             own_n = int(cash_df["Own_Narrow"].sum()) if "Own_Narrow" in cash_df.columns else 0
