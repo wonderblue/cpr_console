@@ -302,8 +302,8 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     return view.reset_index(drop=True)
 
 
-tab_best, tab_jcurve, tab_full, tab_narrow, tab_bull, tab_bear, tab_top, tab_wl, tab_follow, tab_week, tab_month, tab_rules = st.tabs(
-    ["Best today", "🚀 J-Curve", "Full table", "Narrow", "Bullish CPR", "Bearish CPR", "Top 20 narrow", "Watchlist", "Follow-through", "Weekly CPR", "Monthly CPR", "Rules"]
+tab_best, tab_jcurve, tab_full, tab_narrow, tab_mod, tab_bull, tab_bear, tab_top, tab_wl, tab_follow, tab_week, tab_month, tab_rules = st.tabs(
+    ["Best today", "🚀 J-Curve", "Full table", "Narrow", "Moderate", "Bullish CPR", "Bearish CPR", "Top 20 narrow", "Watchlist", "Follow-through", "Weekly CPR", "Monthly CPR", "Rules"]
 )
 
 with tab_best:
@@ -396,6 +396,22 @@ with tab_narrow:
             "📥 Download narrow (CSV)",
             data=csv_bytes(view),
             file_name=f"cpr_narrow_{result.date}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+with tab_mod:
+    moderate_df = result.moderate if hasattr(result, "moderate") and not result.moderate.empty else (result.full[result.full["CPR_Class"] == "Moderate"].reset_index(drop=True) if "CPR_Class" in result.full.columns else pd.DataFrame())
+    view = apply_filters(moderate_df)
+    st.caption(f"{len(view)} moderate CPR names (width 0.25% – 1.00%, ideal for steady trend-following)")
+    if view.empty:
+        st.info("No moderate CPR names match the current filters.")
+    else:
+        st.dataframe(style_table(format_view(view)), use_container_width=True, height=480)
+        st.download_button(
+            "📥 Download moderate (CSV)",
+            data=csv_bytes(view),
+            file_name=f"cpr_moderate_{result.date}.csv",
             mime="text/csv",
             use_container_width=True,
         )

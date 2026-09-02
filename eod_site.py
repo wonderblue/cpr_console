@@ -176,6 +176,8 @@ def _write_downloads(result: ScanResult, dest: Path) -> dict:
     }
     if not result.wide.empty:
         mapping["wide"] = ("cpr_wide.csv", result.wide)
+    if hasattr(result, "moderate") and not result.moderate.empty:
+        mapping["moderate"] = ("cpr_moderate.csv", result.moderate)
     if hasattr(result, "jcurve") and not result.jcurve.empty:
         mapping["jcurve"] = ("cpr_jcurve.csv", result.jcurve)
     files = []
@@ -209,11 +211,13 @@ def _write_downloads(result: ScanResult, dest: Path) -> dict:
     return {
         "full": "downloads/cpr_full.csv",
         "narrow": "downloads/cpr_narrow.csv",
+        "moderate": "downloads/cpr_moderate.csv" if hasattr(result, "moderate") and not result.moderate.empty else None,
         "bullish": "downloads/cpr_bullish.csv",
         "bullish_bias": "downloads/cpr_bullish_bias.csv",
         "bearish": "downloads/cpr_bearish.csv",
         "top20": "downloads/cpr_top20_narrow.csv",
         "best": "downloads/cpr_best.csv",
+        "jcurve": "downloads/cpr_jcurve.csv" if hasattr(result, "jcurve") and not result.jcurve.empty else None,
         "watchlist": "downloads/cpr_watchlist.csv",
         "weekly": "downloads/cpr_weekly.csv",
         "monthly": "downloads/cpr_monthly.csv",
@@ -287,6 +291,7 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
             "gainers": _records(gainers_df),
             "losers": _records(losers_df),
             "narrow": _records(result.narrow),
+            "moderate": _records(result.moderate) if hasattr(result, "moderate") and not result.moderate.empty else [],
             "bullish": _records(result.bullish),
             "bullish_bias": _records(result.bullish_bias),
             "bearish": _records(result.bearish),
@@ -474,6 +479,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
       <button role="tab" aria-selected="false" data-tab="bullish">🟢 Bullish CPR</button>
       <button role="tab" aria-selected="false" data-tab="bearish">🔴 Bearish</button>
       <button role="tab" aria-selected="false" data-tab="narrow">⚡ Narrow</button>
+      <button role="tab" aria-selected="false" data-tab="moderate">📏 Moderate</button>
       <button role="tab" aria-selected="false" data-tab="wide">↔️ Wide CPR</button>
       <button role="tab" aria-selected="false" data-tab="full">📊 All Scanned</button>
     </div>
@@ -1403,6 +1409,7 @@ function downloads() {
     ["J-Curve Setups CSV", d.jcurve],
     ["Complete Watchlist CSV", d.watchlist],
     ["Wide CPR CSV", d.wide],
+    ["Moderate CPR CSV", d.moderate],
     ["Narrow CPR CSV", d.narrow],
     ["Bullish CPR", d.bullish],
     ["Bullish Bias", d.bullish_bias],

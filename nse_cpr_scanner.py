@@ -190,6 +190,7 @@ class ScanResult:
     weekly_top20: pd.DataFrame = field(default_factory=pd.DataFrame)
     monthly_top20: pd.DataFrame = field(default_factory=pd.DataFrame)
     jcurve: pd.DataFrame = field(default_factory=pd.DataFrame)
+    moderate: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _nse_session() -> requests.Session:
@@ -1408,6 +1409,11 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         jcurve = pd.read_csv(jcurve_path)
     if jcurve.empty and "JCurve_Stage" in full.columns:
         jcurve = full[full["JCurve_Stage"].isin(["Liftoff", "Ready"])].sort_values(["JCurve_Stage", "JCurve_Score"], ascending=[True, False]).reset_index(drop=True)
+    moderate_path = resolve_scan_csv("moderate", date, output_dir)
+    if moderate_path.exists():
+        moderate = pd.read_csv(moderate_path)
+    else:
+        moderate = full[full["CPR_Class"] == "Moderate"].sort_values("CPR_Width_Pct").reset_index(drop=True) if "CPR_Class" in full.columns else pd.DataFrame()
     result = ScanResult(
         date=date,
         cash_rows=len(full),
@@ -1423,6 +1429,7 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         wide=wide,
         bullish_bias=bullish_bias,
         jcurve=jcurve,
+        moderate=moderate,
     )
     weekly_path = resolve_scan_csv("weekly", date, output_dir)
     monthly_path = resolve_scan_csv("monthly", date, output_dir)
@@ -2009,6 +2016,10 @@ def export_results(
     jcurve_path = scan_csv_path("jcurve", date, output_dir)
     if not jcurve.empty:
         jcurve.to_csv(jcurve_path, index=False)
+    moderate = df[df["CPR_Class"] == "Moderate"].sort_values("CPR_Width_Pct").reset_index(drop=True) if "CPR_Class" in df.columns else pd.DataFrame()
+    moderate_path = scan_csv_path("moderate", date, output_dir)
+    if not moderate.empty:
+        moderate.to_csv(moderate_path, index=False)
     try:
         save_session_parquet(full_table, date, output_dir)
     except Exception:
@@ -2016,6 +2027,7 @@ def export_results(
     if verbose:
         print(f"✓ Full table: {paths['full']}")
         print(f"✓ Narrow CPR: {len(narrow)} symbols → {paths['narrow']}")
+        print(f"✓ Moderate CPR: {len(moderate)} symbols → {moderate_path}")
         print(f"✓ Bullish CPR: {len(bullish)} symbols → {paths['bullish']}")
         print(f"✓ Bullish Bias: {len(bullish_bias)} symbols → {paths['bullish_bias']}")
         print(f"✓ Bearish CPR: {len(bearish)} symbols → {paths['bearish']}")
@@ -2042,6 +2054,7 @@ def export_results(
         wide=wide,
         bullish_bias=bullish_bias,
         jcurve=jcurve,
+        moderate=moderate,
     )
 
 
