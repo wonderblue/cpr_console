@@ -905,8 +905,8 @@ else:
         with tab_movers:
             st.subheader("🚀 Top 25 Movers vs CPR Analysis")
             st.caption("Analyze how today's biggest market movers correlate with CPR width, overlays, and price positions.")
-            if all_results_df is not None and not all_results_df.empty:
-                df_m = all_results_df.copy()
+            if all_df is not None and not all_df.empty:
+                df_m = all_df.copy()
                 if 'Current Price' in df_m.columns and 'Previous Close' in df_m.columns:
                     cp = pd.to_numeric(df_m['Current Price'], errors='coerce')
                     pc = pd.to_numeric(df_m['Previous Close'], errors='coerce')

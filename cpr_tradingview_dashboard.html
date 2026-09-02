@@ -220,6 +220,16 @@
             });
         }
 
+        function escapeHtml(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         function renderStockList() {
             const list = document.getElementById('stock-list');
             list.innerHTML = '';
@@ -251,17 +261,17 @@
                 item.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <strong style="color: #fff;">#${stock.Rank} ${stock.SYMBOL}</strong>
+                            <strong style="color: #fff;">#${escapeHtml(stock.Rank)} ${escapeHtml(stock.SYMBOL)}</strong>
                             ${isNarrow ? '<span class="badge badge-purple">Narrow</span>' : '<span class="badge badge-blue">Vol Surge</span>'}
                         </div>
                         <span style="font-weight: 700; color: #fff;">₹${stock.LTP.toLocaleString('en-IN')}</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; color: #8b949e; font-size: 11px;">
-                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">${stock.NAME}</span>
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">${escapeHtml(stock.NAME)}</span>
                         <span style="color: ${chgColor}; font-weight: 600;">${stock.DAY_CHG_PCT >= 0 ? '+' : ''}${stock.DAY_CHG_PCT}%</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 10px; color: #8b949e;">
-                        <span>CPR: ${stock.CPR_Width_Pct}% (${stock.CPR_Class})</span>
+                        <span>CPR: ${stock.CPR_Width_Pct}% (${escapeHtml(stock.CPR_Class)})</span>
                         ${posBadge}
                     </div>
                 `;
@@ -275,7 +285,7 @@
             if (!stock) return;
 
             document.getElementById('active-badge').innerText = `Active: ${stock.SYMBOL} (#${stock.Rank})`;
-            document.getElementById('tv-external-link').href = `https://in.tradingview.com/chart/?symbol=NSE%3A${stock.SYMBOL}`;
+            document.getElementById('tv-external-link').href = `https://in.tradingview.com/chart/?symbol=NSE%3A${encodeURIComponent(stock.SYMBOL)}`;
 
             // Metrics bar
             const mb = document.getElementById('metrics-bar');
@@ -303,7 +313,7 @@
                 <div class="metric-card">
                     <div class="metric-label">CPR Width %</div>
                     <div class="metric-val" style="color: #bc8cff;">${stock.CPR_Width_Pct}%</div>
-                    <span style="font-size: 10px; color: #8b949e;">${stock.CPR_Class} Compression</span>
+                    <span style="font-size: 10px; color: #8b949e;">${escapeHtml(stock.CPR_Class)} Compression</span>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Volume vs 60d</div>
@@ -325,10 +335,10 @@
                     <span style="color: #8b949e;">CPR Range:</span> <strong style="color: #bc8cff;">₹${stock.CPR_Bottom} - ₹${stock.CPR_Top}</strong>
                 </div>
                 <div style="background: #0d1117; padding: 6px 10px; border-radius: 4px; border: 1px solid #30363d;">
-                    <span style="color: #8b949e;">Status:</span> <strong style="color: ${stock.Current_Position_LTP === 'Above CPR' ? '#3fb950' : stock.Current_Position_LTP === 'Below CPR' ? '#f85149' : '#d29922'};">${stock.Current_Position_LTP}</strong>
+                    <span style="color: #8b949e;">Status:</span> <strong style="color: ${stock.Current_Position_LTP === 'Above CPR' ? '#3fb950' : stock.Current_Position_LTP === 'Below CPR' ? '#f85149' : '#d29922'};">${escapeHtml(stock.Current_Position_LTP)}</strong>
                 </div>
                 <div style="background: #0d1117; padding: 6px 10px; border-radius: 4px; border: 1px solid #30363d;">
-                    <span style="color: #8b949e;">Sector:</span> <strong style="color: #58a6ff;">${stock.Industry} ${stock.Nifty500 ? '(N500)' : ''}</strong>
+                    <span style="color: #8b949e;">Sector:</span> <strong style="color: #58a6ff;">${escapeHtml(stock.Industry)} ${stock.Nifty500 ? '(N500)' : ''}</strong>
                 </div>
             `;
 

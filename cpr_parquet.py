@@ -80,9 +80,9 @@ def load_session_parquet(
 
 def get_parquet_glob(output_dir: Optional[Union[str, Path]] = None) -> str:
     """Return the glob pattern for all Parquet files in the lakehouse."""
-    root = Path(output_dir) if output_dir is not None else DEFAULT_OUTPUT_DIR
+    root = Path(output_dir).resolve() if output_dir is not None else DEFAULT_OUTPUT_DIR.resolve()
     parquet_root = root / PARQUET_SUBDIR
-    return str(parquet_root / "**" / "*.parquet")
+    return str(parquet_root / "**" / "*.parquet").replace("'", "''")
 
 
 def query_duckdb(

@@ -518,33 +518,36 @@ with tab_week:
                 if w_cat != "All":
                     top_weekly = top_weekly[top_weekly["CATEGORY"] == w_cat].reset_index(drop=True)
                 
-                st.markdown("### 📈 Interactive TradingView Lightweight CPR Chart")
-                w_stock_symbols = top_weekly["SYMBOL"].tolist()
-                w_selected_sym = st.selectbox("Select stock to inspect", w_stock_symbols, index=0, key="week_chart_sym")
-                
-                w_sel_row = top_weekly[top_weekly["SYMBOL"] == w_selected_sym].iloc[0]
-                
-                wcol1, wcol2, wcol3, wcol4, wcol5 = st.columns(5)
-                wcol1.metric("LTP", f"₹{w_sel_row['LTP']:,.2f}", f"{w_sel_row.get('DAY_CHG_PCT', 0.0):+}%")
-                wcol2.metric("CPR Top (TC)", f"₹{w_sel_row['CPR_Top']:,.2f}")
-                wcol3.metric("Pivot", f"₹{w_sel_row['Pivot']:,.2f}")
-                wcol4.metric("CPR Bottom (BC)", f"₹{w_sel_row['CPR_Bottom']:,.2f}")
-                wcol5.metric("Unified Score", f"{w_sel_row['UNIFIED_SCORE']:.1f}", w_sel_row['CATEGORY'])
-                
-                st.info(f"🎯 **Trade Plan & Commentary:** {w_sel_row['Commentary']}")
-                
-                st.markdown(f"[🚀 Open **{w_selected_sym}** on TradingView.com](https://in.tradingview.com/chart/?symbol=NSE:{w_selected_sym})")
-                
-                st.markdown(f"#### Weekly Watchlist Table ({len(top_weekly)} stocks)")
-                st.dataframe(top_weekly, use_container_width=True, height=420)
-                
-                st.download_button(
-                    f"📥 Download Top {w_size} Weekly Watchlist (CSV)",
-                    data=csv_bytes(top_weekly),
-                    file_name=f"top_{w_size}_weekly_cpr_watchlist_{result.date}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+                if not top_weekly.empty:
+                    st.markdown("### 📈 Interactive TradingView Lightweight CPR Chart")
+                    w_stock_symbols = top_weekly["SYMBOL"].tolist()
+                    w_selected_sym = st.selectbox("Select stock to inspect", w_stock_symbols, index=0, key="week_chart_sym")
+                    
+                    w_sel_row = top_weekly[top_weekly["SYMBOL"] == w_selected_sym].iloc[0]
+                    
+                    wcol1, wcol2, wcol3, wcol4, wcol5 = st.columns(5)
+                    wcol1.metric("LTP", f"₹{w_sel_row['LTP']:,.2f}", f"{w_sel_row.get('DAY_CHG_PCT', 0.0):+}%")
+                    wcol2.metric("CPR Top (TC)", f"₹{w_sel_row['CPR_Top']:,.2f}")
+                    wcol3.metric("Pivot", f"₹{w_sel_row['Pivot']:,.2f}")
+                    wcol4.metric("CPR Bottom (BC)", f"₹{w_sel_row['CPR_Bottom']:,.2f}")
+                    wcol5.metric("Unified Score", f"{w_sel_row['UNIFIED_SCORE']:.1f}", w_sel_row['CATEGORY'])
+                    
+                    st.info(f"🎯 **Trade Plan & Commentary:** {w_sel_row['Commentary']}")
+                    
+                    st.markdown(f"[🚀 Open **{w_selected_sym}** on TradingView.com](https://in.tradingview.com/chart/?symbol=NSE:{w_selected_sym})")
+                    
+                    st.markdown(f"#### Weekly Watchlist Table ({len(top_weekly)} stocks)")
+                    st.dataframe(top_weekly, use_container_width=True, height=420)
+                    
+                    st.download_button(
+                        f"📥 Download Top {w_size} Weekly Watchlist (CSV)",
+                        data=csv_bytes(top_weekly),
+                        file_name=f"top_{w_size}_weekly_cpr_watchlist_{result.date}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                else:
+                    st.info(f"No candidates match category '{w_cat}'.")
             else:
                 st.info("No candidates qualify for Weekly Top Watchlist.")
 
@@ -586,33 +589,36 @@ with tab_month:
                 if wl_cat != "All":
                     top_watchlist = top_watchlist[top_watchlist["CATEGORY"] == wl_cat].reset_index(drop=True)
                 
-                st.markdown("### 📈 Interactive TradingView Lightweight CPR Chart")
-                stock_symbols = top_watchlist["SYMBOL"].tolist()
-                selected_sym = st.selectbox("Select stock to inspect", stock_symbols, index=0, key="month_chart_sym")
-                
-                sel_row = top_watchlist[top_watchlist["SYMBOL"] == selected_sym].iloc[0]
-                
-                mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
-                mcol1.metric("LTP", f"₹{sel_row['LTP']:,.2f}", f"{sel_row.get('DAY_CHG_PCT', 0.0):+}%")
-                mcol2.metric("CPR Top (TC)", f"₹{sel_row['CPR_Top']:,.2f}")
-                mcol3.metric("Pivot", f"₹{sel_row['Pivot']:,.2f}")
-                mcol4.metric("CPR Bottom (BC)", f"₹{sel_row['CPR_Bottom']:,.2f}")
-                mcol5.metric("Unified Score", f"{sel_row['UNIFIED_SCORE']:.1f}", sel_row['CATEGORY'])
-                
-                st.info(f"🎯 **Trade Plan & Commentary:** {sel_row['Commentary']}")
-                
-                st.markdown(f"[🚀 Open **{selected_sym}** on TradingView.com](https://in.tradingview.com/chart/?symbol=NSE:{selected_sym})")
-                
-                st.markdown(f"#### Watchlist Table ({len(top_watchlist)} stocks)")
-                st.dataframe(top_watchlist, use_container_width=True, height=420)
-                
-                st.download_button(
-                    f"📥 Download Top {wl_size} Watchlist (CSV)",
-                    data=csv_bytes(top_watchlist),
-                    file_name=f"top_{wl_size}_cpr_watchlist_{result.date}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+                if not top_watchlist.empty:
+                    st.markdown("### 📈 Interactive TradingView Lightweight CPR Chart")
+                    stock_symbols = top_watchlist["SYMBOL"].tolist()
+                    selected_sym = st.selectbox("Select stock to inspect", stock_symbols, index=0, key="month_chart_sym")
+                    
+                    sel_row = top_watchlist[top_watchlist["SYMBOL"] == selected_sym].iloc[0]
+                    
+                    mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
+                    mcol1.metric("LTP", f"₹{sel_row['LTP']:,.2f}", f"{sel_row.get('DAY_CHG_PCT', 0.0):+}%")
+                    mcol2.metric("CPR Top (TC)", f"₹{sel_row['CPR_Top']:,.2f}")
+                    mcol3.metric("Pivot", f"₹{sel_row['Pivot']:,.2f}")
+                    mcol4.metric("CPR Bottom (BC)", f"₹{sel_row['CPR_Bottom']:,.2f}")
+                    mcol5.metric("Unified Score", f"{sel_row['UNIFIED_SCORE']:.1f}", sel_row['CATEGORY'])
+                    
+                    st.info(f"🎯 **Trade Plan & Commentary:** {sel_row['Commentary']}")
+                    
+                    st.markdown(f"[🚀 Open **{selected_sym}** on TradingView.com](https://in.tradingview.com/chart/?symbol=NSE:{selected_sym})")
+                    
+                    st.markdown(f"#### Watchlist Table ({len(top_watchlist)} stocks)")
+                    st.dataframe(top_watchlist, use_container_width=True, height=420)
+                    
+                    st.download_button(
+                        f"📥 Download Top {wl_size} Watchlist (CSV)",
+                        data=csv_bytes(top_watchlist),
+                        file_name=f"top_{wl_size}_cpr_watchlist_{result.date}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                else:
+                    st.info(f"No candidates match category '{wl_cat}'.")
             else:
                 st.info("No candidates qualify for Monthly Top Watchlist.")
                 

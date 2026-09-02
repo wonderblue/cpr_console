@@ -568,9 +568,9 @@ def backfill_cached_scans(
         full_path = resolve_scan_csv("full", date, output_dir)
         if full_path.exists():
             header = set(pd.read_csv(full_path, nrows=0).columns)
-            if skip_existing and "Setup" in header and "Overlay" in header:
+            if skip_existing and "Setup" in header and "Overlay" in header and "JCurve_Stage" in header:
                 continue
-            print(f"  enrich {date} with overlay / own-narrow")
+            print(f"  enrich {date} with overlay / own-narrow / jcurve")
             result = load_scan_result(date, output_dir)
             export_results(result.full, date, output_dir=output_dir, verbose=False)
             written.append(date)
@@ -1984,6 +1984,7 @@ def export_results(
     # this export path are attached. Existing setup/filter membership is unchanged.
     df = attach_confirmation_score(df)
     df = attach_wide_strategy(df)
+    df = attach_jcurve_strategy(df)
     full_table, narrow, bullish, bearish, top20 = split_shortlists(df)
     bullish_bias = bullish_bias_view(df)
 

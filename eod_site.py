@@ -2048,9 +2048,16 @@ def build_site(
     return dates
 
 
+class SecureHTTPRequestHandler(SimpleHTTPRequestHandler):
+    def end_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        super().end_headers()
+
+
 def serve(site_dir: Path, port: int) -> None:
-    handler = SimpleHTTPRequestHandler
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), lambda *a, **k: handler(*a, directory=str(site_dir), **k))
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), lambda *a, **k: SecureHTTPRequestHandler(*a, directory=str(site_dir), **k))
     print(f"Preview: http://127.0.0.1:{port}")
     httpd.serve_forever()
 

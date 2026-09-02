@@ -1,0 +1,2 @@
+# Optional extras for this sub-project. Parent requirements.txt already covers Streamlit/pandas.
+# Copy dhan_live/dhan_credentials.example to dhan_live/dhan_credentials.env — no extra pip packages required.
