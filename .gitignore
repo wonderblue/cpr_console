@@ -8,4 +8,5 @@ cpr_output/bhavcopy/
 dhan_live/.env
 dhan_live/dhan_credentials.env
 dhan_live/.cache/
-
+stage5_reports/
+*.log

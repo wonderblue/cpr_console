@@ -114,6 +114,16 @@ TABLE_COLS = [
     "JCurve_Stage",
     "JCurve_Score",
     "JCurve_Explanation",
+    "AI_Conviction_Score",
+    "AI_Conviction_Grade",
+    "AI_Insight",
+    "AI_Risk_Flag",
+    "AI_Trade_Plan",
+    "AI_Entry_Zone",
+    "AI_Stop_Loss",
+    "AI_Target_1",
+    "AI_Target_2",
+    "AI_RR",
 ]
 
 
@@ -265,6 +275,14 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
     if monthly_top20_df is None or monthly_top20_df.empty:
         monthly_top20_df = compute_monthly_top_watchlist(result.monthly, n=20, daily_df=result.full)
 
+    jcurve_df = getattr(result, "jcurve", pd.DataFrame())
+    if jcurve_df is not None and not jcurve_df.empty:
+        try:
+            from ai_validator import attach_ai_validation
+            jcurve_df = attach_ai_validation(jcurve_df)
+        except Exception:
+            pass
+
     return {
         "date": result.date,
         "label": _date_label(result.date),
@@ -299,7 +317,7 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
             "bearish": _records(result.bearish),
             "top20": _records(result.top20),
             "best": _records(result.best) if not result.best.empty else [],
-            "jcurve": _records(result.jcurve) if hasattr(result, "jcurve") and not result.jcurve.empty else [],
+            "jcurve": _records(jcurve_df) if jcurve_df is not None and not jcurve_df.empty else [],
             "watchlist": _records(result.watchlist) if not result.watchlist.empty else [],
             "wide": _records(result.wide) if not result.wide.empty else [],
             "follow": _records(result.follow_through) if not result.follow_through.empty else [],
@@ -1089,8 +1107,9 @@ tr[data-symbol]:hover td { background: var(--card-hover); }
 JS = r"""
 let DATA = null;
 const PAYLOAD_URL = window.CPR_PAYLOAD_URL;
-const COLS = ["SYMBOL","DAY_CHG_PCT","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Risk_Multiplier","JCurve_Stage","JCurve_Score","JCurve_Explanation","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
+const COLS = ["SYMBOL","DAY_CHG_PCT","NAME","Industry","CLOSE","Pivot","BC","TC","CPR_Width_Pct","Width_Rank_Pct","CPR_Class","Own_Narrow","Overlay","Setup","Risk_Multiplier","JCurve_Stage","AI_Conviction_Grade","AI_Conviction_Score","JCurve_Score","JCurve_Explanation","AI_Insight","AI_Risk_Flag","AI_Trade_Plan","Bias","Price_Position","Segment","History_Days","Value_60d","ATR14","Width_ATR","Value_Ratio","Above_SMA50","Above_SMA100","Regime","Confluence_Score","Signal_Direction","Signal_Score","Signal_Grade","Signal_Explanation","Strategy_Type","Strategy_Setup","Strategy_Confirmation","Strategy_Explanation","Applies"];
 const COMPACT_COLS = ["SYMBOL","DAY_CHG_PCT","Setup","JCurve_Stage","Risk_Multiplier","Price_Position","CPR_Gauge","CLOSE","CPR_Bottom","CPR_Top","CPR_Width_Pct","Overlay","Confluence_Score","Value_Ratio","Industry"];
+const JCURVE_COLS = ["SYMBOL","DAY_CHG_PCT","JCurve_Stage","AI_Conviction_Grade","AI_Conviction_Score","JCurve_Score","CLOSE","Value_Ratio","CPR_Width_Pct","Overlay","Confluence_Score","Industry"];
 const FOLLOW_COLS = ["SYMBOL","DAY_CHG_PCT","Industry","Setup","CPR_Width_Pct","Width_Rank_Pct","Segment","Next_Close","Follow_Through"];
 let tab = "best";
 let currentPreset = "all";
@@ -1428,6 +1447,8 @@ function fmt(col, val) {
   if (col === "DAY_CHG_PCT") return (Number(val) > 0 ? "+" : "") + Number(val).toFixed(2) + "%";
   if (col === "CPR_Width_Pct") return Number(val).toFixed(4) + "%";
   if (col === "Width_Rank_Pct" || col === "Confluence_Score" || col === "Signal_Score" || col === "JCurve_Score") return Number(val).toFixed(2);
+  if (col === "AI_Conviction_Score") return Number(val) > 0 ? Number(val).toFixed(0) : "—";
+  if (col === "AI_Conviction_Grade") return val || "—";
   if (col === "Risk_Multiplier") return Number(val) > 0 ? Number(val).toFixed(1) + "R" : "0.0R";
   if (col === "JCurve_Stage") return val === "Liftoff" ? "🚀 Liftoff" : (val === "Ready" ? "🪝 Ready" : "—");
   if (col === "Value_Ratio") return Number(val).toFixed(2);
@@ -1455,6 +1476,15 @@ function cprRangeGauge(row) {
 
 function cellHtml(col, val, row) {
   if (col === "CPR_Gauge") return cprRangeGauge(row);
+  if (col === "AI_Conviction_Grade") {
+    const gr = val || "—";
+    const badgeCls = gr === "A+" ? "bull" : (gr === "A" ? "confirmed" : (gr === "B" ? "narrow" : "neutral"));
+    return `<span class="badge ${badgeCls}" style="font-weight:700;">${esc(gr)}</span>`;
+  }
+  if (col === "AI_Conviction_Score") {
+    const sc = Number(val || 0);
+    return `<strong style="color:${sc >= 80 ? 'var(--bull)' : (sc >= 65 ? 'var(--accent)' : 'var(--text)')};">${sc > 0 ? sc : '—'}</strong>`;
+  }
   const rendered = fmt(col, val);
   if (col === "SYMBOL") return `${isWatched(val) ? '<span class="watch-star" title="In My list">★</span>' : ""}${esc(rendered)}`;
   return col === "Strategy_Confirmation" ? badgeHtml(rendered) : esc(rendered);
@@ -1476,6 +1506,7 @@ function klass(col, val) {
   if (col === "JCurve_Stage" && val === "Liftoff") return "bull";
   if (col === "JCurve_Stage" && val === "Ready") return "narrow";
   if (col === "JCurve_Score" && Number(val) >= 75) return "bull";
+  if (col === "AI_Conviction_Score" && Number(val) >= 80) return "bull";
   if (col === "Signal_Score" && Number(val) >= 65) return "bull";
   if (col === "Signal_Score" && Number(val) < 50) return "bear";
   if (col === "Strategy_Confirmation" && val === "Confirmed") return "bull";
@@ -1663,6 +1694,34 @@ function openDrawer(row, trigger) {
       <div class="detail-item"><span>Wide Strategy</span><strong>${esc(stratLabel)} ${confirmation ? badgeHtml(confirmation) : ''}</strong></div>
       <div class="detail-item"><span>Confluence Score</span><strong style="color:var(--accent);font-size:16px;">${esc(row.Confluence_Score || '0')} / 6</strong></div>
     </section>
+    ${(row.AI_Conviction_Score || row.AI_Insight) ? `
+    <section class="drawer-section ai-audit-card" style="background:rgba(56,139,253,0.06);border:1px solid rgba(56,139,253,0.25);border-left:4px solid var(--accent);border-radius:6px;padding:12px 14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h3 style="margin:0;color:var(--accent);font-size:13px;display:flex;align-items:center;gap:6px;">
+          <span>🤖 AI Deep Prop-Desk Audit</span>
+        </h3>
+        <span class="badge ${row.AI_Conviction_Grade === 'A+' ? 'bull' : (row.AI_Conviction_Grade === 'A' ? 'confirmed' : 'watch')}" style="font-weight:700;font-size:12px;">
+          ${esc(row.AI_Conviction_Grade || 'A')} · ${esc(row.AI_Conviction_Score || '0')}/100
+        </span>
+      </div>
+      <div style="margin-bottom:8px;font-size:12px;line-height:1.5;">
+        <strong style="color:var(--text-bright,#e6edf3);">💡 Thesis:</strong> ${esc(row.AI_Insight || '—')}
+      </div>
+      <div style="margin-bottom:8px;font-size:12px;line-height:1.5;color:#f85149;">
+        <strong>⚠️ Red Team Risk:</strong> ${esc(row.AI_Risk_Flag || '—')}
+      </div>
+      <div style="font-size:12px;line-height:1.6;background:rgba(0,0,0,0.25);border-radius:4px;padding:8px 10px;border:1px solid rgba(255,255,255,0.06);">
+        <div style="font-weight:600;color:var(--text-bright,#e6edf3);margin-bottom:4px;">🎯 Execution Blueprint:</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;">
+          <div><span>Entry Zone:</span> <strong>${esc(row.AI_Entry_Zone || '—')}</strong></div>
+          <div><span>Hard Stop Loss:</span> <strong style="color:#f85149;">₹${esc(fmt('CLOSE', row.AI_Stop_Loss))}</strong></div>
+          <div><span>Target 1:</span> <strong style="color:#3ecf8e;">₹${esc(fmt('CLOSE', row.AI_Target_1))}</strong></div>
+          <div><span>Target 2:</span> <strong style="color:#3ecf8e;">₹${esc(fmt('CLOSE', row.AI_Target_2))}</strong></div>
+          <div style="grid-column:1 / -1;margin-top:2px;"><span>Reward-to-Risk:</span> <strong style="color:var(--accent);">${esc(row.AI_RR || '—')}</strong></div>
+        </div>
+      </div>
+    </section>
+    ` : ''}
     <section class="drawer-section">
       <h3>Next-Session CPR Chart (TC / Pivot / BC)</h3>
       <div id="tv-chart-container"></div>
@@ -1760,7 +1819,7 @@ function render() {
   const badgeEl = $("tvCountBadge");
   if (badgeEl) badgeEl.textContent = String(data.length);
 
-  const cols = tab === "follow" ? FOLLOW_COLS : ($("columnMode").value === "research" ? COLS : COMPACT_COLS);
+  const cols = tab === "follow" ? FOLLOW_COLS : (tab === "jcurve" ? JCURVE_COLS : ($("columnMode").value === "research" ? COLS : COMPACT_COLS));
   const guide = $("emptyGuide");
   guide.hidden = data.length !== 0;
   if (!data.length) {
