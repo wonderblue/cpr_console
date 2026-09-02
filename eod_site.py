@@ -125,6 +125,8 @@ def _records(df: pd.DataFrame) -> list:
     if df is None or df.empty:
         return []
     frame = df.copy()
+    if "CLOSE" not in frame.columns and "LTP" in frame.columns:
+        frame["CLOSE"] = frame["LTP"]
     if "DAY_CHG_PCT" not in frame.columns:
         if "PREVCLOSE" in frame.columns and "CLOSE" in frame.columns:
             prev_c = pd.to_numeric(frame["PREVCLOSE"], errors="coerce")

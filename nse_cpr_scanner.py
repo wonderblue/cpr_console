@@ -1731,15 +1731,16 @@ def compute_monthly_top_watchlist(
         elif "CLOSE" in d_sub.columns:
             d_sub["LTP"] = d_sub["CLOSE"]
         
-        top_n = top_n.rename(columns={"CLOSE": "AUG_CLOSE"})
+        top_n = top_n.rename(columns={"CLOSE": "PREV_PERIOD_CLOSE"})
         top_n = top_n.merge(d_sub[["SYMBOL", "LTP"]], on="SYMBOL", how="left")
-        top_n["LTP"] = top_n["LTP"].fillna(top_n.get("AUG_CLOSE", np.nan))
+        top_n["LTP"] = top_n["LTP"].fillna(top_n.get("PREV_PERIOD_CLOSE", np.nan))
     else:
-        top_n["AUG_CLOSE"] = top_n["CLOSE"] if "CLOSE" in top_n.columns else np.nan
-        top_n["LTP"] = top_n["AUG_CLOSE"]
+        top_n["PREV_PERIOD_CLOSE"] = top_n["CLOSE"] if "CLOSE" in top_n.columns else np.nan
+        top_n["LTP"] = top_n["PREV_PERIOD_CLOSE"]
 
-    if "AUG_CLOSE" in top_n.columns and "LTP" in top_n.columns:
-        top_n["DAY_CHG_PCT"] = ((top_n["LTP"] - top_n["AUG_CLOSE"]) / top_n["AUG_CLOSE"] * 100).round(2)
+    top_n["CLOSE"] = top_n["LTP"]
+    if "PREV_PERIOD_CLOSE" in top_n.columns and "LTP" in top_n.columns:
+        top_n["DAY_CHG_PCT"] = ((top_n["LTP"] - top_n["PREV_PERIOD_CLOSE"]) / top_n["PREV_PERIOD_CLOSE"] * 100).round(2)
 
     def _get_cur_pos(r):
         ltp = r.get("LTP")
@@ -1879,15 +1880,16 @@ def compute_weekly_top_watchlist(
         elif "CLOSE" in d_sub.columns:
             d_sub["LTP"] = d_sub["CLOSE"]
         
-        top_n = top_n.rename(columns={"CLOSE": "PREV_CLOSE"})
+        top_n = top_n.rename(columns={"CLOSE": "PREV_PERIOD_CLOSE"})
         top_n = top_n.merge(d_sub[["SYMBOL", "LTP"]], on="SYMBOL", how="left")
-        top_n["LTP"] = top_n["LTP"].fillna(top_n.get("PREV_CLOSE", np.nan))
+        top_n["LTP"] = top_n["LTP"].fillna(top_n.get("PREV_PERIOD_CLOSE", np.nan))
     else:
-        top_n["PREV_CLOSE"] = top_n["CLOSE"] if "CLOSE" in top_n.columns else np.nan
-        top_n["LTP"] = top_n["PREV_CLOSE"]
+        top_n["PREV_PERIOD_CLOSE"] = top_n["CLOSE"] if "CLOSE" in top_n.columns else np.nan
+        top_n["LTP"] = top_n["PREV_PERIOD_CLOSE"]
 
-    if "PREV_CLOSE" in top_n.columns and "LTP" in top_n.columns:
-        top_n["DAY_CHG_PCT"] = ((top_n["LTP"] - top_n["PREV_CLOSE"]) / top_n["PREV_CLOSE"] * 100).round(2)
+    top_n["CLOSE"] = top_n["LTP"]
+    if "PREV_PERIOD_CLOSE" in top_n.columns and "LTP" in top_n.columns:
+        top_n["DAY_CHG_PCT"] = ((top_n["LTP"] - top_n["PREV_PERIOD_CLOSE"]) / top_n["PREV_PERIOD_CLOSE"] * 100).round(2)
 
     def _get_cur_pos(r):
         ltp = r.get("LTP")
