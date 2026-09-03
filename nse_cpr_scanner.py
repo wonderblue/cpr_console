@@ -492,18 +492,33 @@ def load_history_panel(dates: List[str], output_dir: Optional[Path] = None) -> p
             return pq_df
     cache = bhavcopy_cache_dir(output_dir)
     frames = []
-    for date in dates:
+    sorted_dates = sorted(dates)
+    for date in sorted_dates:
         path = cache / f"cm_{date}.csv"
         if not path.exists():
-            continue
+            scan_path = resolve_scan_csv("full", date, output_dir)
+            if scan_path.exists():
+                path = scan_path
+            else:
+                continue
         df = pd.read_csv(path)
         if df.empty:
             continue
-        df["session"] = date
-        frames.append(compute_cpr(df))
+        df["session"] = str(date)
+        frames.append(df)
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    panel = pd.concat(frames, ignore_index=True)
+    panel["SYMBOL"] = panel["SYMBOL"].astype(str).str.strip().str.upper()
+    panel = panel.sort_values(["SYMBOL", "session"]).reset_index(drop=True)
+    for col in ["HIGH", "LOW", "CLOSE"]:
+        if col in panel.columns:
+            panel[col] = pd.to_numeric(panel[col], errors="coerce")
+    panel["PREV_HIGH"] = panel.groupby("SYMBOL")["HIGH"].shift(1)
+    panel["PREV_LOW"] = panel.groupby("SYMBOL")["LOW"].shift(1)
+    panel["PREV_CLOSE"] = panel.groupby("SYMBOL")["CLOSE"].shift(1)
+    panel = compute_cpr(panel)
+    return panel
 
 
 def scan_from_cached_bhavcopy(
@@ -521,11 +536,20 @@ def scan_from_cached_bhavcopy(
     if cash_df.empty:
         raise RuntimeError(f"Cached bhavcopy {date} has no listed equity rows")
     cash_df = attach_industry(cash_df, fetch=False)
-    if "Segment" not in cash_df.columns:
-        cash_df["Segment"] = "Cash Only"
-    cash_df = compute_cpr(cash_df)
-    cash_df = apply_bullish_cpr_filters(cash_df)
     hist_dates = cached_history_dates(date, output_dir, lookback)
+    prev_df = None
+    if hist_dates:
+        earlier = [d for d in hist_dates if d < date]
+        if earlier:
+            prev_date = max(earlier)
+            prev_path = bhavcopy_cache_dir(output_dir) / f"cm_{prev_date}.csv"
+            if prev_path.exists():
+                try:
+                    prev_df = keep_listed_equity(pd.read_csv(prev_path), quiet=True)
+                except Exception:
+                    prev_df = None
+    cash_df = compute_cpr(cash_df, prev_df=prev_df)
+    cash_df = apply_bullish_cpr_filters(cash_df)
     if hist_dates:
         cash_df = attach_history_features(
             cash_df, load_history_panel(hist_dates, output_dir), own_window=HISTORY_LOOKBACK
@@ -997,6 +1021,13 @@ def aggregate_htf_bars(history_df: pd.DataFrame, freq: str) -> pd.DataFrame:
     grouped = df.sort_values(["SYMBOL", "dt"]).groupby(["SYMBOL", "period_end"], sort=True)
     out = grouped.agg(agg).reset_index()
     out["session"] = out["period_end"]
+    out = out.sort_values(["SYMBOL", "session"]).reset_index(drop=True)
+    for col in ["HIGH", "LOW", "CLOSE"]:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    out["PREV_HIGH"] = out.groupby("SYMBOL")["HIGH"].shift(1)
+    out["PREV_LOW"] = out.groupby("SYMBOL")["LOW"].shift(1)
+    out["PREV_CLOSE"] = out.groupby("SYMBOL")["CLOSE"].shift(1)
     out = compute_cpr(out)
     if "Industry" not in out.columns:
         out = attach_industry(out, fetch=False)
@@ -1109,20 +1140,41 @@ def attach_htf_to_result(result: ScanResult, output_dir: Optional[Path] = None, 
     return result
 
 
-def compute_cpr(df: pd.DataFrame) -> pd.DataFrame:
+def compute_cpr(
+    df: pd.DataFrame,
+    prev_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
     """
-    Compute CPR columns for a bhavcopy DataFrame.
-    Required columns: SYMBOL, OPEN, HIGH, LOW, CLOSE
+    Compute Active Session CPR columns for a bhavcopy DataFrame.
+    If prev_df is provided (or if PREV_HIGH/PREV_LOW/PREV_CLOSE exist in df),
+    CPR band levels are computed from the prior session (T-1) so that Price_Position
+    accurately reflects whether Day T traded Above/Below/Inside Day T's active CPR.
     """
     out = df.copy()
     for col in ["OPEN", "HIGH", "LOW", "CLOSE"]:
-        out[col] = pd.to_numeric(out[col], errors="coerce")
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    if prev_df is not None and not prev_df.empty and "SYMBOL" in prev_df.columns:
+        prev_sub = prev_df[["SYMBOL", "HIGH", "LOW", "CLOSE"]].copy()
+        for col in ["HIGH", "LOW", "CLOSE"]:
+            prev_sub[col] = pd.to_numeric(prev_sub[col], errors="coerce")
+        prev_sub = prev_sub.rename(
+            columns={"HIGH": "PREV_HIGH", "LOW": "PREV_LOW", "CLOSE": "PREV_CLOSE"}
+        )
+        out = out.drop(columns=["PREV_HIGH", "PREV_LOW", "PREV_CLOSE"], errors="ignore")
+        out = out.merge(prev_sub, on="SYMBOL", how="left")
+
+    has_ref = "PREV_HIGH" in out.columns and "PREV_LOW" in out.columns and "PREV_CLOSE" in out.columns
 
     canonical = calculate_cpr_frame(
         out,
         high_col="HIGH",
         low_col="LOW",
         close_col="CLOSE",
+        ref_high_col="PREV_HIGH" if has_ref else None,
+        ref_low_col="PREV_LOW" if has_ref else None,
+        ref_close_col="PREV_CLOSE" if has_ref else None,
         narrow_max_pct=CPR_NARROW_MAX_PCT,
         wide_min_pct=CPR_WIDE_MIN_PCT,
     )
@@ -2087,19 +2139,32 @@ def scan_eod_cpr(
 
         cash_df = tag_fo_symbols(cash_df, fo_df)
         cash_df = attach_industry(cash_df, fetch=True)
-        cash_df = compute_cpr(cash_df)
+        seed_bhavcopy_cache(cash_df, date, output_dir=output_dir)
+        hist_dates = ensure_bhavcopy_history(
+            date, lookback=lookback, output_dir=output_dir, session=session
+        ) if (lookback and lookback > 0) else []
+
+        prev_df = None
+        if hist_dates:
+            earlier = [d for d in hist_dates if d < date]
+            if earlier:
+                prev_date = max(earlier)
+                prev_path = bhavcopy_cache_dir(output_dir) / f"cm_{prev_date}.csv"
+                if prev_path.exists():
+                    try:
+                        prev_df = keep_listed_equity(pd.read_csv(prev_path), quiet=True)
+                    except Exception:
+                        prev_df = None
+
+        cash_df = compute_cpr(cash_df, prev_df=prev_df)
         cash_df = apply_bullish_cpr_filters(cash_df)
 
-        seed_bhavcopy_cache(cash_df, date, output_dir=output_dir)
-        if lookback and lookback > 0:
+        if lookback and lookback > 0 and hist_dates:
             pq_dates = cached_parquet_dates(date, lookback=lookback, output_dir=output_dir, include_end_date=False)
             if len(pq_dates) >= min(int(lookback * 0.8), MIN_HISTORY_DAYS):
                 hist_panel = load_history_panel_parquet(dates=pq_dates, output_dir=output_dir)
                 print(f"History panel: {len(pq_dates)} sessions loaded from Parquet lakehouse")
             else:
-                hist_dates = ensure_bhavcopy_history(
-                    date, lookback=lookback, output_dir=output_dir, session=session
-                )
                 hist_panel = load_history_panel(hist_dates, output_dir)
 
             cash_df = attach_history_features(

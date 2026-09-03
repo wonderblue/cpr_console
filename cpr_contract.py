@@ -116,22 +116,34 @@ def calculate_cpr_frame(
     high_col: str,
     low_col: str,
     close_col: str,
+    ref_high_col: Optional[str] = None,
+    ref_low_col: Optional[str] = None,
+    ref_close_col: Optional[str] = None,
     narrow_max_pct: float = CPR_NARROW_MAX_PCT,
     wide_min_pct: float = CPR_WIDE_MIN_PCT,
 ) -> pd.DataFrame:
-    """Calculate canonical CPR columns for a pandas frame."""
+    """Calculate canonical CPR columns for a pandas frame.
+    
+    If ref_*_col are provided (e.g. from prior session T-1), the CPR band levels
+    (pivot, bc, tc, top, bottom, width, bias) are computed from the reference OHLC,
+    while price_position is evaluated using close_col from the active session.
+    """
     high = pd.to_numeric(frame[high_col], errors="coerce")
     low = pd.to_numeric(frame[low_col], errors="coerce")
     close = pd.to_numeric(frame[close_col], errors="coerce")
 
+    ref_high = pd.to_numeric(frame[ref_high_col], errors="coerce").fillna(high) if ref_high_col and ref_high_col in frame.columns else high
+    ref_low = pd.to_numeric(frame[ref_low_col], errors="coerce").fillna(low) if ref_low_col and ref_low_col in frame.columns else low
+    ref_close = pd.to_numeric(frame[ref_close_col], errors="coerce").fillna(close) if ref_close_col and ref_close_col in frame.columns else close
+
     result = pd.DataFrame(index=frame.index)
-    result["pivot"] = (high + low + close) / 3.0
-    result["bc"] = (high + low) / 2.0
+    result["pivot"] = (ref_high + ref_low + ref_close) / 3.0
+    result["bc"] = (ref_high + ref_low) / 2.0
     result["tc"] = 2.0 * result["pivot"] - result["bc"]
     result["top"] = result[["bc", "tc"]].max(axis=1)
     result["bottom"] = result[["bc", "tc"]].min(axis=1)
     result["width"] = result["top"] - result["bottom"]
-    denominator = close.where(close > 0)
+    denominator = ref_close.where(ref_close > 0, close.where(close > 0))
     result["width_pct"] = result["width"].div(denominator).mul(100.0)
     result["width_class"] = [
         classify_width(value, narrow_max_pct, wide_min_pct)

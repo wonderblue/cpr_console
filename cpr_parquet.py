@@ -361,6 +361,7 @@ def load_history_panel_parquet(
 
 def backfill_csv_to_parquet(
     output_dir: Optional[Union[str, Path]] = None,
+    overwrite: bool = False,
     verbose: bool = True,
 ) -> int:
     """
@@ -384,7 +385,7 @@ def backfill_csv_to_parquet(
     for date in sorted(unique_csvs.keys()):
         csv_path = unique_csvs[date]
         parquet_path = parquet_session_path(date, root)
-        if not parquet_path.exists():
+        if overwrite or not parquet_path.exists():
             try:
                 df = pd.read_csv(csv_path, low_memory=False)
                 if not df.empty and "SYMBOL" in df.columns:
