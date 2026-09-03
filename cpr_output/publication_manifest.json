@@ -4,10 +4,10 @@
     "display": "Source session verified",
     "status": "known"
   },
-  "generated_at_utc": "2026-09-02T17:22:56+00:00",
+  "generated_at_utc": "2026-09-03T07:35:35+00:00",
   "history": {
-    "cached_sessions": 2,
-    "oldest_cached_date": "20260901",
+    "cached_sessions": 252,
+    "oldest_cached_date": "20250826",
     "requested_sessions": 252
   },
   "requested_date": null,
