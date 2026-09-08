@@ -619,6 +619,7 @@ def backfill_htf_scans(
     end_date: str,
     output_dir: Optional[Path] = None,
     lookback: int = HISTORY_LOOKBACK_HTF,
+    overwrite: bool = False,
 ) -> List[str]:
     """Write cpr_weekly_* / cpr_monthly_*.csv for every archived daily session.
 
@@ -644,7 +645,7 @@ def backfill_htf_scans(
             ("M", monthly_bars, MIN_HISTORY_MONTHS, "monthly"),
         ):
             out_path = resolve_scan_csv(suffix, date, output_dir)
-            if out_path.exists() and out_path.stat().st_size:
+            if not overwrite and out_path.exists() and out_path.stat().st_size:
                 continue
             if bars.empty:
                 continue
@@ -715,7 +716,6 @@ def market_regime(history_df: pd.DataFrame, symbol: str = MARKET_SYMBOL) -> str:
 def attached_history_features(
     hist: pd.DataFrame,
     own_window: Optional[int],
-    min_history: int,
 ) -> pd.DataFrame:
     """Per-symbol rolling history features from a bhavcopy panel.
 
@@ -818,7 +818,7 @@ def attach_history_features(
     hist = history_df.copy()
     hist["SYMBOL"] = hist["SYMBOL"].astype(str).str.strip().str.upper()
     hist = hist.sort_values(["SYMBOL", "session"])
-    today, tech = attached_history_features(hist, own_window, min_history)
+    today, tech = attached_history_features(hist, own_window)
 
     latest = hist["session"].max()
     regime = market_regime(hist)
@@ -852,11 +852,11 @@ def attach_history_features(
     out["NR4"] = out["NR4"].fillna(False).astype(bool)
     out["NR7"] = out["NR7"].fillna(False).astype(bool)
 
-    # Virgin CPR calculation
+    # Virgin CPR calculation: compare today's range vs today's active band (CPR_Top / CPR_Bottom)
     low_val = pd.to_numeric(out.get("LOW", np.nan), errors="coerce")
     high_val = pd.to_numeric(out.get("HIGH", np.nan), errors="coerce")
-    pt = pd.to_numeric(out.get("prior_top", np.nan), errors="coerce")
-    pb = pd.to_numeric(out.get("prior_bot", np.nan), errors="coerce")
+    pt = pd.to_numeric(out.get("CPR_Top", np.nan), errors="coerce")
+    pb = pd.to_numeric(out.get("CPR_Bottom", np.nan), errors="coerce")
     out["Virgin_CPR"] = np.where(
         (low_val > pt) & pt.notna(),
         "Bullish Virgin",
@@ -1025,10 +1025,24 @@ def aggregate_htf_bars(history_df: pd.DataFrame, freq: str) -> pd.DataFrame:
     for col in ["HIGH", "LOW", "CLOSE"]:
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
-    out["PREV_HIGH"] = out.groupby("SYMBOL")["HIGH"].shift(1)
-    out["PREV_LOW"] = out.groupby("SYMBOL")["LOW"].shift(1)
-    out["PREV_CLOSE"] = out.groupby("SYMBOL")["CLOSE"].shift(1)
-    out = compute_cpr(out)
+    canonical = calculate_cpr_frame(
+        out,
+        high_col="HIGH",
+        low_col="LOW",
+        close_col="CLOSE",
+        narrow_max_pct=CPR_NARROW_MAX_PCT,
+        wide_min_pct=CPR_WIDE_MIN_PCT,
+    )
+    out["Pivot"] = canonical["pivot"]
+    out["BC"] = canonical["bc"]
+    out["TC"] = canonical["tc"]
+    out["CPR_Top"] = canonical["top"]
+    out["CPR_Bottom"] = canonical["bottom"]
+    out["CPR_Width"] = canonical["width"]
+    out["CPR_Width_Pct"] = canonical["width_pct"]
+    out["CPR_Class"] = canonical["width_class"]
+    out["Bias"] = canonical["bias"]
+    out["Price_Position"] = canonical["price_position"]
     if "Industry" not in out.columns:
         out = attach_industry(out, fetch=False)
     return out
@@ -1188,6 +1202,25 @@ def compute_cpr(
     out["CPR_Class"] = canonical["width_class"]
     out["Bias"] = canonical["bias"]
     out["Price_Position"] = canonical["price_position"]
+
+    # Next session CPR levels computed from day T's own OHLC (actionable numbers for day T+1)
+    next_canonical = calculate_cpr_frame(
+        out,
+        high_col="HIGH",
+        low_col="LOW",
+        close_col="CLOSE",
+        narrow_max_pct=CPR_NARROW_MAX_PCT,
+        wide_min_pct=CPR_WIDE_MIN_PCT,
+    )
+    out["NEXT_Pivot"] = next_canonical["pivot"]
+    out["NEXT_BC"] = next_canonical["bc"]
+    out["NEXT_TC"] = next_canonical["tc"]
+    out["NEXT_CPR_Top"] = next_canonical["top"]
+    out["NEXT_CPR_Bottom"] = next_canonical["bottom"]
+    out["NEXT_CPR_Width"] = next_canonical["width"]
+    out["NEXT_CPR_Width_Pct"] = next_canonical["width_pct"]
+    out["NEXT_CPR_Class"] = next_canonical["width_class"]
+
     return out
 
 
@@ -1238,6 +1271,14 @@ DISPLAY_COLS = [
     "CPR_Width_Pct",
     "Width_Rank_Pct",
     "CPR_Class",
+    "NEXT_Pivot",
+    "NEXT_BC",
+    "NEXT_TC",
+    "NEXT_CPR_Bottom",
+    "NEXT_CPR_Top",
+    "NEXT_CPR_Width",
+    "NEXT_CPR_Width_Pct",
+    "NEXT_CPR_Class",
     "Own_Narrow",
     "Overlay",
     "Setup",
@@ -1300,6 +1341,14 @@ WEB_EXPORT_COLS = [
     "CPR_Width_Pct",
     "Width_Rank_Pct",
     "CPR_Class",
+    "NEXT_Pivot",
+    "NEXT_BC",
+    "NEXT_TC",
+    "NEXT_CPR_Bottom",
+    "NEXT_CPR_Top",
+    "NEXT_CPR_Width",
+    "NEXT_CPR_Width_Pct",
+    "NEXT_CPR_Class",
     "Own_Narrow",
     "NR4",
     "NR7",

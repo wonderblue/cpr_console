@@ -223,7 +223,17 @@ Using previous completed session's High (H), Low (L), Close (C):
 | CPR Top | max(BC, TC) |
 | CPR Bottom | min(BC, TC) |
 | CPR Width | CPR Top − CPR Bottom |
-| CPR Width % | (CPR Width / Previous Close) × 100 |
+| CPR Width % | (CPR Width / Reference Close) × 100 |
+
+> [!NOTE]
+> **Width% Convention**: We compute `CPR Width % = (CPR Width / Reference Close) × 100` (where Reference Close is the bar's Close, e.g., Previous Close for active CPR, or Current Close for next-session CPR), rather than `Width / Pivot`. Both conventions exist in the wild; this screener and site explicitly standardize on `Width / Close`.
+
+### Active vs Next-Session CPR (EOD Scanner)
+
+The EOD pipeline publishes two complementary sets of levels:
+- **Active-session CPR** (`Pivot`, `TC`, `BC`, `CPR_Top`, `CPR_Bottom`, `CPR_Width`, `CPR_Width_Pct`, `CPR_Class`): Computed from session $T-1$ reference OHLC. This preserves TradingView parity so that `Price_Position` correctly shows whether day $T$ traded Above, Below, or Inside the CPR active during day $T$.
+- **Next-session CPR** (`NEXT_Pivot`, `NEXT_TC`, `NEXT_BC`, `NEXT_CPR_Top`, `NEXT_CPR_Bottom`, `NEXT_CPR_Width`, `NEXT_CPR_Width_Pct`, `NEXT_CPR_Class`): Computed from completed day $T$'s own OHLC. These are the actionable levels traders use for setting alerts and planning orders for day $T+1$.
+- **Weekly & Monthly CPR**: Computed directly from the completed period's own aggregated $(H, L, C)$, applying to the next week / next month.
 
 ### Bias Detection
 

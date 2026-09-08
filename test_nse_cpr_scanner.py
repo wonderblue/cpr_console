@@ -288,6 +288,103 @@ class TestEquityAndIndustry(unittest.TestCase):
         self.assertTrue((out["Risk_Multiplier"] >= 0.0).all())
         self.assertTrue((out["Risk_Multiplier"] <= 1.0).all())
 
+    def test_weekly_htf_pivot_matches_own_period_hlc(self):
+        from nse_cpr_scanner import aggregate_htf_bars
+        rows = [
+            # Week 1: 2026-08-03 to 2026-08-07
+            {"SYMBOL": "TEST", "session": "20260803", "OPEN": 100.0, "HIGH": 105.0, "LOW": 98.0, "CLOSE": 102.0},
+            {"SYMBOL": "TEST", "session": "20260807", "OPEN": 102.0, "HIGH": 120.0, "LOW": 100.0, "CLOSE": 115.0},
+            # Week 2: 2026-08-10 to 2026-08-14
+            {"SYMBOL": "TEST", "session": "20260810", "OPEN": 115.0, "HIGH": 125.0, "LOW": 110.0, "CLOSE": 122.0},
+            {"SYMBOL": "TEST", "session": "20260814", "OPEN": 122.0, "HIGH": 135.0, "LOW": 118.0, "CLOSE": 130.0},
+        ]
+        df = pd.DataFrame(rows)
+        weekly = aggregate_htf_bars(df, "W-FRI")
+        self.assertEqual(len(weekly), 2)
+        for _, row in weekly.iterrows():
+            expected_pivot = (row["HIGH"] + row["LOW"] + row["CLOSE"]) / 3.0
+            self.assertAlmostEqual(row["Pivot"], expected_pivot, places=6)
+            self.assertAlmostEqual(row["BC"], (row["HIGH"] + row["LOW"]) / 2.0, places=6)
+            self.assertAlmostEqual(row["TC"], 2.0 * expected_pivot - row["BC"], places=6)
+
+    def test_monthly_htf_pivot_matches_own_period_hlc(self):
+        from nse_cpr_scanner import aggregate_htf_bars
+        rows = [
+            # Month 1: July 2026
+            {"SYMBOL": "TEST", "session": "20260701", "OPEN": 100.0, "HIGH": 110.0, "LOW": 95.0, "CLOSE": 105.0},
+            {"SYMBOL": "TEST", "session": "20260731", "OPEN": 105.0, "HIGH": 130.0, "LOW": 102.0, "CLOSE": 125.0},
+            # Month 2: August 2026
+            {"SYMBOL": "TEST", "session": "20260803", "OPEN": 125.0, "HIGH": 140.0, "LOW": 120.0, "CLOSE": 135.0},
+            {"SYMBOL": "TEST", "session": "20260831", "OPEN": 135.0, "HIGH": 150.0, "LOW": 130.0, "CLOSE": 145.0},
+        ]
+        df = pd.DataFrame(rows)
+        monthly = aggregate_htf_bars(df, "M")
+        self.assertEqual(len(monthly), 2)
+        for _, row in monthly.iterrows():
+            expected_pivot = (row["HIGH"] + row["LOW"] + row["CLOSE"]) / 3.0
+            self.assertAlmostEqual(row["Pivot"], expected_pivot, places=6)
+            self.assertAlmostEqual(row["BC"], (row["HIGH"] + row["LOW"]) / 2.0, places=6)
+            self.assertAlmostEqual(row["TC"], 2.0 * expected_pivot - row["BC"], places=6)
+
+    def test_next_session_cpr_matches_own_day_ohlc(self):
+        df = pd.DataFrame({
+            "SYMBOL": ["AAA"],
+            "OPEN": [100.0],
+            "HIGH": [115.0],
+            "LOW": [95.0],
+            "CLOSE": [110.0],
+        })
+        prev_df = pd.DataFrame({
+            "SYMBOL": ["AAA"],
+            "HIGH": [105.0],
+            "LOW": [90.0],
+            "CLOSE": [100.0],
+        })
+        out = compute_cpr(df, prev_df=prev_df).iloc[0]
+        # Active session CPR matches prev_df (T-1)
+        self.assertAlmostEqual(out["Pivot"], (105.0 + 90.0 + 100.0) / 3.0, places=6)
+        # Next session CPR matches day T's own OHLC
+        next_pivot = (115.0 + 95.0 + 110.0) / 3.0
+        next_bc = (115.0 + 95.0) / 2.0
+        next_tc = 2.0 * next_pivot - next_bc
+        self.assertAlmostEqual(out["NEXT_Pivot"], next_pivot, places=6)
+        self.assertAlmostEqual(out["NEXT_BC"], next_bc, places=6)
+        self.assertAlmostEqual(out["NEXT_TC"], next_tc, places=6)
+        self.assertAlmostEqual(out["NEXT_CPR_Top"], max(next_bc, next_tc), places=6)
+        self.assertAlmostEqual(out["NEXT_CPR_Bottom"], min(next_bc, next_tc), places=6)
+        self.assertAlmostEqual(out["NEXT_CPR_Width"], abs(next_tc - next_bc), places=6)
+        self.assertAlmostEqual(out["NEXT_CPR_Width_Pct"], (abs(next_tc - next_bc) / 110.0) * 100.0, places=6)
+
+    def test_virgin_cpr_evaluates_against_active_cpr_band(self):
+        from nse_cpr_scanner import attach_history_features
+        # 3 symbols across 2 sessions
+        # Session 1: Establish prior history and T-1 active CPR levels for session 2
+        s1 = [
+            {"SYMBOL": "BULL_V", "session": "20260813", "OPEN": 100.0, "HIGH": 100.0, "LOW": 90.0, "CLOSE": 95.0, "VALUE": 1e6},
+            {"SYMBOL": "TOUCH_V", "session": "20260813", "OPEN": 100.0, "HIGH": 100.0, "LOW": 90.0, "CLOSE": 95.0, "VALUE": 1e6},
+            {"SYMBOL": "BEAR_V", "session": "20260813", "OPEN": 100.0, "HIGH": 100.0, "LOW": 90.0, "CLOSE": 95.0, "VALUE": 1e6},
+        ]
+        # Session 2: Active CPR from S1: Pivot = (100+90+95)/3 = 95.0, BC = 95.0, TC = 95.0, Top = 95.0, Bot = 95.0
+        s2 = [
+            # BULL_V: LOW = 101.0 > Top (95.0) -> Bullish Virgin
+            {"SYMBOL": "BULL_V", "session": "20260814", "OPEN": 102.0, "HIGH": 110.0, "LOW": 101.0, "CLOSE": 108.0, "VALUE": 1e6},
+            # TOUCH_V: LOW = 93.0, HIGH = 98.0 straddles 95.0 -> None
+            {"SYMBOL": "TOUCH_V", "session": "20260814", "OPEN": 94.0, "HIGH": 98.0, "LOW": 93.0, "CLOSE": 96.0, "VALUE": 1e6},
+            # BEAR_V: HIGH = 90.0 < Bot (95.0) -> Bearish Virgin
+            {"SYMBOL": "BEAR_V", "session": "20260814", "OPEN": 88.0, "HIGH": 90.0, "LOW": 82.0, "CLOSE": 85.0, "VALUE": 1e6},
+        ]
+        panel = pd.DataFrame(s1 + s2)
+        panel["PREV_HIGH"] = panel.groupby("SYMBOL")["HIGH"].shift(1)
+        panel["PREV_LOW"] = panel.groupby("SYMBOL")["LOW"].shift(1)
+        panel["PREV_CLOSE"] = panel.groupby("SYMBOL")["CLOSE"].shift(1)
+        panel = compute_cpr(panel)
+        scan = panel[panel["session"] == "20260814"].copy()
+        out = attach_history_features(scan, panel, min_history=1)
+        res = dict(zip(out["SYMBOL"], out["Virgin_CPR"]))
+        self.assertEqual(res["BULL_V"], "Bullish Virgin")
+        self.assertEqual(res["TOUCH_V"], "None")
+        self.assertEqual(res["BEAR_V"], "Bearish Virgin")
+
 
 if __name__ == "__main__":
     unittest.main()

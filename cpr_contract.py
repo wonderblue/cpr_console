@@ -132,9 +132,22 @@ def calculate_cpr_frame(
     low = pd.to_numeric(frame[low_col], errors="coerce")
     close = pd.to_numeric(frame[close_col], errors="coerce")
 
-    ref_high = pd.to_numeric(frame[ref_high_col], errors="coerce").fillna(high) if ref_high_col and ref_high_col in frame.columns else high
-    ref_low = pd.to_numeric(frame[ref_low_col], errors="coerce").fillna(low) if ref_low_col and ref_low_col in frame.columns else low
-    ref_close = pd.to_numeric(frame[ref_close_col], errors="coerce").fillna(close) if ref_close_col and ref_close_col in frame.columns else close
+    if ref_high_col and ref_high_col in frame.columns:
+        ref_high = pd.to_numeric(frame[ref_high_col], errors="coerce")
+    else:
+        ref_high = high
+
+    if ref_low_col and ref_low_col in frame.columns:
+        ref_low = pd.to_numeric(frame[ref_low_col], errors="coerce")
+    else:
+        ref_low = low
+
+    if ref_close_col and ref_close_col in frame.columns:
+        ref_close = pd.to_numeric(frame[ref_close_col], errors="coerce")
+        denominator = ref_close.where(ref_close > 0)
+    else:
+        ref_close = close
+        denominator = close.where(close > 0)
 
     result = pd.DataFrame(index=frame.index)
     result["pivot"] = (ref_high + ref_low + ref_close) / 3.0
@@ -143,7 +156,6 @@ def calculate_cpr_frame(
     result["top"] = result[["bc", "tc"]].max(axis=1)
     result["bottom"] = result[["bc", "tc"]].min(axis=1)
     result["width"] = result["top"] - result["bottom"]
-    denominator = ref_close.where(ref_close > 0, close.where(close > 0))
     result["width_pct"] = result["width"].div(denominator).mul(100.0)
     result["width_class"] = [
         classify_width(value, narrow_max_pct, wide_min_pct)

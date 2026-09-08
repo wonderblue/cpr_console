@@ -53,12 +53,17 @@ def save_session_parquet(
         out_df["Date"] = date
 
     # Ensure clean string representation for symbol and industry
-    for col in ("SYMBOL", "NAME", "Industry", "Segment", "CPR_Class", "Bias", "Overlay", "Setup", "Price_Position"):
+    for col in ("SYMBOL", "NAME", "Industry", "Segment", "CPR_Class", "NEXT_CPR_Class", "Bias", "Overlay", "Setup", "Price_Position"):
         if col in out_df.columns:
             out_df[col] = out_df[col].astype(str).fillna("")
 
     # Convert numeric columns where applicable
-    for col in ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME", "VALUE", "Pivot", "BC", "TC", "CPR_Width_Pct", "Width_Rank_Pct", "Confluence_Score", "Signal_Score", "Value_60d"):
+    for col in (
+        "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME", "VALUE",
+        "Pivot", "BC", "TC", "CPR_Bottom", "CPR_Top", "CPR_Width", "CPR_Width_Pct",
+        "NEXT_Pivot", "NEXT_BC", "NEXT_TC", "NEXT_CPR_Bottom", "NEXT_CPR_Top", "NEXT_CPR_Width", "NEXT_CPR_Width_Pct",
+        "Width_Rank_Pct", "Confluence_Score", "Signal_Score", "Value_60d",
+    ):
         if col in out_df.columns:
             out_df[col] = pd.to_numeric(out_df[col], errors="coerce")
 

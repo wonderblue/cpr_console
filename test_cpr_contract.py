@@ -49,6 +49,39 @@ class TestCanonicalCpr(unittest.TestCase):
         self.assertTrue(pd.isna(result.iloc[0]["width_pct"]))
         self.assertEqual(result.iloc[0]["width_class"], "Unknown")
 
+    def test_missing_reference_columns_produce_nan_and_unknown(self):
+        frame = pd.DataFrame({
+            "HIGH": [110.0, 200.0],
+            "LOW": [100.0, 190.0],
+            "CLOSE": [106.0, 195.0],
+            "PREV_HIGH": [108.0, float("nan")],
+            "PREV_LOW": [98.0, float("nan")],
+            "PREV_CLOSE": [104.0, float("nan")],
+        })
+        result = calculate_cpr_frame(
+            frame,
+            "HIGH",
+            "LOW",
+            "CLOSE",
+            ref_high_col="PREV_HIGH",
+            ref_low_col="PREV_LOW",
+            ref_close_col="PREV_CLOSE",
+        )
+        # Row 0: valid reference data
+        self.assertAlmostEqual(result.iloc[0]["pivot"], (108 + 98 + 104) / 3.0, places=6)
+        self.assertNotEqual(result.iloc[0]["width_class"], "Unknown")
+        # Row 1: missing reference data -> NaN levels, Unknown classifications (never self-referencing)
+        self.assertTrue(pd.isna(result.iloc[1]["pivot"]))
+        self.assertTrue(pd.isna(result.iloc[1]["bc"]))
+        self.assertTrue(pd.isna(result.iloc[1]["tc"]))
+        self.assertTrue(pd.isna(result.iloc[1]["top"]))
+        self.assertTrue(pd.isna(result.iloc[1]["bottom"]))
+        self.assertTrue(pd.isna(result.iloc[1]["width"]))
+        self.assertTrue(pd.isna(result.iloc[1]["width_pct"]))
+        self.assertEqual(result.iloc[1]["width_class"], "Unknown")
+        self.assertEqual(result.iloc[1]["bias"], "Unknown")
+        self.assertEqual(result.iloc[1]["price_position"], "Unknown")
+
 
 class TestSignalContract(unittest.TestCase):
     def test_eod_scores_preserve_existing_semantics(self):

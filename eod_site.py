@@ -47,6 +47,12 @@ ROUND_2 = {
     "CPR_Bottom",
     "CPR_Top",
     "CPR_Width",
+    "NEXT_Pivot",
+    "NEXT_BC",
+    "NEXT_TC",
+    "NEXT_CPR_Bottom",
+    "NEXT_CPR_Top",
+    "NEXT_CPR_Width",
     "ATR14",
     "SMA50",
     "SMA100",
@@ -74,6 +80,14 @@ TABLE_COLS = [
     "CPR_Width_Pct",
     "Width_Rank_Pct",
     "CPR_Class",
+    "NEXT_Pivot",
+    "NEXT_BC",
+    "NEXT_TC",
+    "NEXT_CPR_Bottom",
+    "NEXT_CPR_Top",
+    "NEXT_CPR_Width",
+    "NEXT_CPR_Width_Pct",
+    "NEXT_CPR_Class",
     "Own_Narrow",
     "Overlay",
     "Setup",
@@ -158,7 +172,7 @@ def _records(df: pd.DataFrame) -> list:
                 rec[col] = None
             elif col in ROUND_2:
                 rec[col] = round(float(val), 2)
-            elif col == "CPR_Width_Pct":
+            elif col in ("CPR_Width_Pct", "NEXT_CPR_Width_Pct"):
                 rec[col] = round(float(val), 4)
             elif col == "Width_Rank_Pct":
                 rec[col] = round(float(val), 3)
