@@ -14,6 +14,7 @@ from nse_cpr_scanner import (
     HISTORY_LOOKBACK_HTF,
     candidate_session_dates,
     discover_scan_dates,
+    prune_scan_archive,
     scan_eod_cpr,
 )
 from publication_contract import (
@@ -97,7 +98,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         dates = discover_scan_dates(output_dir)
         if not dates:
-            print(f"No CSVs in {output_dir}. Run without --site-only first.")
+            print(f"No scans in {output_dir}. Run without --site-only first.")
             sys.exit(1)
         manifest = ensure_manifest(
             output_dir,
@@ -106,6 +107,15 @@ def main(argv: list[str] | None = None) -> None:
             lookback=0,
         )
         write_manifest(output_dir, manifest)
+
+    pruned = prune_scan_archive(output_dir, keep=args.lookback)
+    if pruned["dropped"] or pruned["removed_files"] or pruned["slimmed"]:
+        print(
+            f"Archive: kept {len(pruned['kept'])} sessions, "
+            f"dropped {len(pruned['dropped'])}, "
+            f"removed {pruned['removed_files']} files, "
+            f"slimmed {pruned['slimmed']} full scans"
+        )
 
     output_contract = validate_output_dir(
         output_dir,
@@ -121,8 +131,10 @@ def main(argv: list[str] | None = None) -> None:
     staging = _staging_dir(site_dir)
     if staging.exists():
         shutil.rmtree(staging)
+    if site_dir.is_dir() and any(site_dir.iterdir()):
+        shutil.copytree(site_dir, staging)
     try:
-        dates = build_site(output_dir, staging, max_sessions=args.max_sessions)
+        dates = build_site(output_dir, staging, max_sessions=args.max_sessions, incremental=True)
         validate_site_dir(
             staging,
             expected_date=dates[0],

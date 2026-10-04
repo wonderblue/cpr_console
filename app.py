@@ -20,6 +20,7 @@ import os
 from data_provider import get_data_provider, OHLCVData
 from cpr_engine import CPREngine, CPRResult, CPRBias, PricePosition, VirginCPRStatus, validate_cpr_formulas
 from universe import INDEX_UNIVERSES, load_universe, universe_counts, classify_symbol
+from live_watchlist import watchlist_membership
 
 
 # ============================================================================
@@ -725,18 +726,27 @@ else:
         else:
             st.caption(f"Auto refresh every {refresh_seconds}s.")
 
-    def build_watchlist(all_df: pd.DataFrame) -> pd.DataFrame:
+    def build_watchlist(all_df: pd.DataFrame, *, record_events: bool) -> pd.DataFrame:
         filtered_df = apply_watchlist_filters(all_df, cpr_engine)
         watchlist = all_df if show_all else filtered_df
         watchlist = rank_live_watchlist(watchlist)
-        watchlist, entered, exited = annotate_live_changes(
-            watchlist, st.session_state.prev_match_symbols
+        symbols = []
+        if watchlist is not None and not watchlist.empty and "Symbol" in watchlist.columns:
+            symbols = [symbol for symbol in watchlist["Symbol"].tolist() if symbol]
+        entered, exited, baseline = watchlist_membership(
+            symbols,
+            st.session_state.prev_match_symbols,
+            record_events=record_events,
         )
+        if record_events:
+            watchlist, entered, exited = annotate_live_changes(
+                watchlist, st.session_state.prev_match_symbols
+            )
+        elif watchlist is not None and not watchlist.empty and "Live Change" in watchlist.columns:
+            watchlist = watchlist.drop(columns=["Live Change"])
         st.session_state.entered_symbols = entered
         st.session_state.exited_symbols = exited
-        st.session_state.prev_match_symbols = (
-            watchlist["Symbol"].tolist() if watchlist is not None and not watchlist.empty else []
-        )
+        st.session_state.prev_match_symbols = baseline
         st.session_state.scan_results = watchlist
         return watchlist
 
@@ -751,7 +761,7 @@ else:
         st.session_state.all_symbols_data = all_df
         st.session_state.last_refresh = datetime.now()
         st.session_state.force_fetch = False
-        build_watchlist(all_df)
+        build_watchlist(all_df, record_events=True)
 
     do_fetch = bool(st.session_state.force_fetch)
     if refresh_mode == "Auto" and st.session_state.all_symbols_data is None:
@@ -776,9 +786,9 @@ else:
                     st.error(f"❌ Error during scan: {str(e)}")
                     return
             elif st.session_state.all_symbols_data is not None:
-                build_watchlist(st.session_state.all_symbols_data)
+                build_watchlist(st.session_state.all_symbols_data, record_events=False)
         elif st.session_state.all_symbols_data is not None:
-            build_watchlist(st.session_state.all_symbols_data)
+            build_watchlist(st.session_state.all_symbols_data, record_events=False)
         else:
             st.info("Manual refresh is on. Click **Refresh Data** to run the scan.")
             return

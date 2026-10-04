@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import io
+import shutil
 import sys
 import time
 import zipfile
@@ -44,7 +45,13 @@ from cpr_scoring import SCORE_FIELDS, attach_confirmation_score
 from wide_cpr_strategy import WIDE_FIELDS, attach_wide_strategy, wide_table
 from signal_contract import setup_score
 from jcurve_engine import attach_jcurve_strategy
-from cpr_parquet import cached_parquet_dates, load_history_panel_parquet, save_session_parquet
+from cpr_parquet import (
+    cached_parquet_dates,
+    load_history_panel_parquet,
+    load_session_parquet,
+    parquet_session_path,
+    save_session_parquet,
+)
 
 OUTPUT_DIR = Path("cpr_output")
 IST = ZoneInfo("Asia/Kolkata")
@@ -621,11 +628,7 @@ def backfill_htf_scans(
     lookback: int = HISTORY_LOOKBACK_HTF,
     overwrite: bool = False,
 ) -> List[str]:
-    """Write cpr_weekly_* / cpr_monthly_*.csv for every archived daily session.
-
-    Aggregates the daily cache to week/month bars once, then per archived session
-    replays the completed-period logic so every archive page gets HTF tabs.
-    """
+    """Write each completed week and month once, shared by the daily sessions that use it."""
     output_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR
     dates = cached_history_dates(end_date, output_dir, lookback)
     if len(dates) < 5:
@@ -636,20 +639,27 @@ def backfill_htf_scans(
     weekly_bars = aggregate_htf_bars(panel, "W-FRI")
     monthly_bars = aggregate_htf_bars(panel, "M")
     written: List[str] = []
+    seen: set[tuple[str, str]] = set()
     for date in dates:
-        full_path = resolve_scan_csv("full", date, output_dir)
-        if not full_path.exists():
+        full_ready = resolve_scan_csv("full", date, output_dir).exists() or (
+            parquet_session_path(date, output_dir).exists()
+        )
+        if not full_ready:
             continue
         for freq, bars, min_hist, suffix in (
             ("W-FRI", weekly_bars, MIN_HISTORY_WEEKS, "weekly"),
             ("M", monthly_bars, MIN_HISTORY_MONTHS, "monthly"),
         ):
-            out_path = resolve_scan_csv(suffix, date, output_dir)
-            if not overwrite and out_path.exists() and out_path.stat().st_size:
-                continue
             if bars.empty:
                 continue
             complete_end = last_complete_period_end(date, freq)
+            key = (suffix, complete_end)
+            if key in seen:
+                continue
+            seen.add(key)
+            out_path = htf_frame_path(suffix, complete_end, output_dir)
+            if not overwrite and out_path.exists() and out_path.stat().st_size:
+                continue
             hist = bars[bars["session"] <= complete_end]
             if hist.empty or hist["session"].nunique() < min_hist:
                 continue
@@ -662,10 +672,10 @@ def backfill_htf_scans(
             frame["Applies"] = htf_applies_label(str(latest), freq)
             frame["Timeframe"] = "Weekly" if freq.startswith("W") else "Monthly"
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            frame.to_csv(out_path, index=False)
-            written.append(f"{date}_{suffix}")
+            web_frame(frame).to_csv(out_path, index=False)
+            written.append(f"{suffix}_{complete_end}")
     if written:
-        print(f"HTF archive: wrote {len(written)} week/month CSVs")
+        print(f"HTF archive: wrote {len(written)} completed week/month frames")
     return written
 
 
@@ -1117,6 +1127,22 @@ def attach_confluence(
     return out
 
 
+def _store_htf_frame(frame: pd.DataFrame, kind: str, output_dir: Path) -> None:
+    """Persist one completed week or month. Later sessions in that period reuse the file."""
+    if frame is None or frame.empty:
+        return
+    period_end = ""
+    if "session" in frame.columns and not frame.empty:
+        period_end = str(frame["session"].iloc[0])
+    if len(period_end) != 8 or not period_end.isdigit():
+        return
+    path = htf_frame_path(kind, period_end, output_dir)
+    if path.exists() and path.stat().st_size:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    web_frame(frame).to_csv(path, index=False)
+
+
 def attach_htf_to_result(result: ScanResult, output_dir: Optional[Path] = None, write_csv: bool = True) -> ScanResult:
     """Add weekly / monthly CPR from cached daily bhavcopies."""
     output_dir = Path(output_dir) if output_dir is not None else result.output_dir
@@ -1140,13 +1166,11 @@ def attach_htf_to_result(result: ScanResult, output_dir: Optional[Path] = None, 
         result.weekly_applies = w_label
         result.monthly_applies = m_label
     if write_csv:
-        day_dir = session_dir(result.date, output_dir)
-        day_dir.mkdir(parents=True, exist_ok=True)
+        _store_htf_frame(weekly, "weekly", output_dir)
+        _store_htf_frame(monthly, "monthly", output_dir)
         if not weekly.empty:
-            weekly.to_csv(scan_csv_path("weekly", result.date, output_dir), index=False)
             print(f"✓ Weekly CPR ({w_label}): {len(weekly)} names")
         if not monthly.empty:
-            monthly.to_csv(scan_csv_path("monthly", result.date, output_dir), index=False)
             print(f"✓ Monthly CPR ({m_label}): {len(monthly)} names")
     w_setups = int(weekly["Setup"].isin(["Long", "Short", "Watch"]).sum()) if not weekly.empty and "Setup" in weekly.columns else 0
     m_setups = int(monthly["Setup"].isin(["Long", "Short", "Watch"]).sum()) if not monthly.empty and "Setup" in monthly.columns else 0
@@ -1445,7 +1469,47 @@ def discover_scan_dates(output_dir: Optional[Path] = None) -> List[str]:
         for p in output_dir.glob("cpr_full_*.csv")
         if p.stem.split("_")[-1].isdigit()
     }
-    return sorted(nested | flat, reverse=True)
+    parquet_dates = {
+        p.stem.split("_")[-1]
+        for p in output_dir.rglob("cpr_full_*.parquet")
+        if p.stem.split("_")[-1].isdigit() and "bhavcopy" not in p.parts
+    }
+    return sorted(nested | flat | parquet_dates, reverse=True)
+
+
+def htf_frame_path(kind: str, period_end: str, output_dir: Optional[Path] = None) -> Path:
+    """One weekly or monthly frame per completed period, not per daily session."""
+    if kind not in ("weekly", "monthly"):
+        raise ValueError(f"HTF kind must be weekly or monthly, got {kind!r}")
+    if len(period_end) != 8 or not period_end.isdigit():
+        raise ValueError(f"Period end must be YYYYMMDD, got {period_end!r}")
+    root = Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    return root / "htf" / kind / f"cpr_{kind}_{period_end}.csv"
+
+
+def _load_stored_full(date: str, output_dir: Path) -> pd.DataFrame:
+    """Load a session from the CSV publish window, or from Parquet when that is all that remains."""
+    full_path = resolve_scan_csv("full", date, output_dir)
+    if full_path.exists():
+        return pd.read_csv(full_path)
+    frame = load_session_parquet(date, output_dir)
+    if frame is not None and not frame.empty:
+        return frame
+    raise FileNotFoundError(f"Missing full scan for {date} under {output_dir}")
+
+
+def _load_htf_frame(kind: str, date: str, freq: str, output_dir: Path) -> tuple[pd.DataFrame, str]:
+    period_end = last_complete_period_end(date, freq)
+    path = htf_frame_path(kind, period_end, output_dir)
+    if not path.exists():
+        path = resolve_scan_csv(kind, date, output_dir)
+    if not path.exists():
+        return pd.DataFrame(), ""
+    frame = pd.read_csv(path)
+    applies = ""
+    if "Applies" in frame.columns and not frame.empty:
+        applies = str(frame["Applies"].iloc[0])
+    return frame, applies
 
 
 def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Optional[str] = None) -> ScanResult:
@@ -1455,10 +1519,7 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
     (e.g. from discover_scan_dates) so large archives do not re-glob per date.
     """
     output_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR
-    full_path = resolve_scan_csv("full", date, output_dir)
-    if not full_path.exists():
-        raise FileNotFoundError(f"Missing {full_path}")
-    full = pd.read_csv(full_path)
+    full = _load_stored_full(date, output_dir)
     for col in ("Bullish_CPR", "Bearish_CPR", "Own_Narrow", "History_OK", "Above_SMA50", "Above_SMA100", "Nifty500"):
         if col in full.columns:
             full[col] = full[col].astype(str).str.lower().isin(["true", "1", "yes"])
@@ -1532,16 +1593,8 @@ def load_scan_result(date: str, output_dir: Optional[Path] = None, previous: Opt
         jcurve=jcurve,
         moderate=moderate,
     )
-    weekly_path = resolve_scan_csv("weekly", date, output_dir)
-    monthly_path = resolve_scan_csv("monthly", date, output_dir)
-    if weekly_path.exists():
-        result.weekly = pd.read_csv(weekly_path)
-        if "Applies" in result.weekly.columns and not result.weekly.empty:
-            result.weekly_applies = str(result.weekly["Applies"].iloc[0])
-    if monthly_path.exists():
-        result.monthly = pd.read_csv(monthly_path)
-        if "Applies" in result.monthly.columns and not result.monthly.empty:
-            result.monthly_applies = str(result.monthly["Applies"].iloc[0])
+    result.weekly, result.weekly_applies = _load_htf_frame("weekly", date, "W-FRI", output_dir)
+    result.monthly, result.monthly_applies = _load_htf_frame("monthly", date, "M", output_dir)
     previous = previous or [d for d in discover_scan_dates(output_dir) if d < date]
     if previous and isinstance(previous, list):
         previous = previous[0] if previous else None
@@ -2091,57 +2144,32 @@ def export_results(
     full_table, narrow, bullish, bearish, top20 = split_shortlists(df)
     bullish_bias = bullish_bias_view(df)
 
-    paths = {
-        "full": scan_csv_path("full", date, output_dir),
-        "narrow": scan_csv_path("narrow", date, output_dir),
-        "bullish": scan_csv_path("bullish", date, output_dir),
-        "bullish_bias": scan_csv_path("bullish_bias", date, output_dir),
-        "bearish": scan_csv_path("bearish", date, output_dir),
-        "top20_narrow": scan_csv_path("top20_narrow", date, output_dir),
-        "best": scan_csv_path("best", date, output_dir),
-    }
-    full_table.to_csv(paths["full"], index=False)
-    narrow.to_csv(paths["narrow"], index=False)
-    bullish.to_csv(paths["bullish"], index=False)
-    bullish_bias.to_csv(paths["bullish_bias"], index=False)
-    bearish.to_csv(paths["bearish"], index=False)
-    top20.to_csv(paths["top20_narrow"], index=False)
-    best = compute_best(df)
-    best.to_csv(paths["best"], index=False)
-    watchlist = compute_watchlist(df)
-    watch_path = scan_csv_path("watchlist", date, output_dir)
-    if not watchlist.empty:
-        watchlist.to_csv(watch_path, index=False)
-    wide = wide_table(df)
-    wide_path = scan_csv_path("wide", date, output_dir)
-    if not wide.empty:
-        wide.to_csv(wide_path, index=False)
-    jcurve = df[df["JCurve_Stage"].isin(["Liftoff", "Ready"])].sort_values(["JCurve_Stage", "JCurve_Score"], ascending=[True, False]).reset_index(drop=True) if "JCurve_Stage" in df.columns else pd.DataFrame()
-    jcurve_path = scan_csv_path("jcurve", date, output_dir)
-    if not jcurve.empty:
-        jcurve.to_csv(jcurve_path, index=False)
-    moderate = df[df["CPR_Class"] == "Moderate"].sort_values("CPR_Width_Pct").reset_index(drop=True) if "CPR_Class" in df.columns else pd.DataFrame()
-    moderate_path = scan_csv_path("moderate", date, output_dir)
-    if not moderate.empty:
-        moderate.to_csv(moderate_path, index=False)
+    full_path = scan_csv_path("full", date, output_dir)
+    stored = web_frame(full_table)
+    stored.to_csv(full_path, index=False)
     try:
-        save_session_parquet(full_table, date, output_dir)
+        save_session_parquet(stored, date, output_dir)
     except Exception:
         pass
+    best = compute_best(df)
+    watchlist = compute_watchlist(df)
+    wide = wide_table(df)
+    jcurve = df[df["JCurve_Stage"].isin(["Liftoff", "Ready"])].sort_values(["JCurve_Stage", "JCurve_Score"], ascending=[True, False]).reset_index(drop=True) if "JCurve_Stage" in df.columns else pd.DataFrame()
+    moderate = df[df["CPR_Class"] == "Moderate"].sort_values("CPR_Width_Pct").reset_index(drop=True) if "CPR_Class" in df.columns else pd.DataFrame()
     if verbose:
-        print(f"✓ Full table: {paths['full']}")
-        print(f"✓ Narrow CPR: {len(narrow)} symbols → {paths['narrow']}")
-        print(f"✓ Moderate CPR: {len(moderate)} symbols → {moderate_path}")
-        print(f"✓ Bullish CPR: {len(bullish)} symbols → {paths['bullish']}")
-        print(f"✓ Bullish Bias: {len(bullish_bias)} symbols → {paths['bullish_bias']}")
-        print(f"✓ Bearish CPR: {len(bearish)} symbols → {paths['bearish']}")
-        print(f"✓ Top 20 Narrow: {paths['top20_narrow']}")
-        print(f"✓ Best today: {len(best)} symbols → {paths['best']}")
+        print(f"✓ Full table: {full_path} ({len(stored.columns)} columns)")
+        print(f"✓ Narrow CPR: {len(narrow)} symbols (derived at site build)")
+        print(f"✓ Moderate CPR: {len(moderate)} symbols (derived at site build)")
+        print(f"✓ Bullish CPR: {len(bullish)} symbols (derived at site build)")
+        print(f"✓ Bullish Bias: {len(bullish_bias)} symbols (derived at site build)")
+        print(f"✓ Bearish CPR: {len(bearish)} symbols (derived at site build)")
+        print(f"✓ Top 20 Narrow: {len(top20)} symbols (derived at site build)")
+        print(f"✓ Best today: {len(best)} symbols (derived at site build)")
         if not watchlist.empty:
-            print(f"✓ Watchlist: {len(watchlist)} symbols → {watch_path}")
-        print(f"✓ Wide CPR: {len(wide)} symbols → {wide_path}")
+            print(f"✓ Watchlist: {len(watchlist)} symbols (derived at site build)")
+        print(f"✓ Wide CPR: {len(wide)} symbols (derived at site build)")
         if not jcurve.empty:
-            print(f"✓ J-Curve Setups: {len(jcurve)} symbols → {jcurve_path}")
+            print(f"✓ J-Curve Setups: {len(jcurve)} symbols (derived at site build)")
 
     return ScanResult(
         date=date,
@@ -2160,6 +2188,119 @@ def export_results(
         jcurve=jcurve,
         moderate=moderate,
     )
+
+
+SHORTLIST_KINDS = (
+    "narrow",
+    "moderate",
+    "wide",
+    "bullish",
+    "bullish_bias",
+    "bearish",
+    "top20_narrow",
+    "best",
+    "watchlist",
+    "jcurve",
+)
+
+
+def _unlink_file(path: Path) -> bool:
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def consolidate_htf_frames(output_dir: Path, dates: List[str]) -> int:
+    """Copy the newest per-session week/month CSV for each completed period into ``htf/``."""
+    output_dir = Path(output_dir)
+    copied = 0
+    seen: set[tuple[str, str]] = set()
+    for date in dates:
+        for kind, freq in (("weekly", "W-FRI"), ("monthly", "M")):
+            legacy = resolve_scan_csv(kind, date, output_dir)
+            if not legacy.exists():
+                continue
+            period_end = last_complete_period_end(date, freq)
+            key = (kind, period_end)
+            if key in seen:
+                continue
+            seen.add(key)
+            dest = htf_frame_path(kind, period_end, output_dir)
+            if dest.exists() and dest.stat().st_size:
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if legacy.resolve() == dest.resolve():
+                continue
+            shutil.copy2(legacy, dest)
+            copied += 1
+    return copied
+
+
+def slim_full_session(date: str, output_dir: Path) -> bool:
+    """Drop raw UDI columns from a committed full scan and refresh its Parquet twin."""
+    path = resolve_scan_csv("full", date, output_dir)
+    if not path.exists():
+        return False
+    header = list(pd.read_csv(path, nrows=0).columns)
+    extra = [col for col in header if col not in WEB_EXPORT_COLS]
+    if not extra:
+        return False
+    frame = web_frame(pd.read_csv(path))
+    frame.to_csv(path, index=False)
+    try:
+        save_session_parquet(frame, date, output_dir)
+    except Exception:
+        pass
+    return True
+
+
+def _delete_session_sidecars(date: str, output_dir: Path, *, include_full: bool) -> int:
+    """Remove duplicate shortlists and per-session HTF copies. Full scans stay unless dropped."""
+    removed = 0
+    kinds = list(SHORTLIST_KINDS) + ["weekly", "monthly"]
+    if include_full:
+        kinds = ["full", *kinds]
+    root = Path(output_dir)
+    for kind in kinds:
+        for path in (scan_csv_path(kind, date, output_dir), root / f"cpr_{kind}_{date}.csv"):
+            if _unlink_file(path):
+                removed += 1
+    if include_full and _unlink_file(parquet_session_path(date, output_dir)):
+        removed += 1
+    return removed
+
+
+def prune_scan_archive(
+    output_dir: Optional[Path] = None,
+    keep: int = HISTORY_LOOKBACK_HTF,
+) -> dict:
+    """Keep a rolling lookback of slim full scans and drop duplicate shortlists.
+
+    ``keep <= 0`` keeps every discovered session. Session files older than the
+    window are removed from the working tree; git history is left untouched.
+    """
+    output_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    dates = discover_scan_dates(output_dir)
+    if keep <= 0:
+        kept, dropped = dates, []
+    else:
+        kept, dropped = dates[:keep], dates[keep:]
+    consolidate_htf_frames(output_dir, dates)
+    removed_files = 0
+    slimmed = 0
+    for date in dropped:
+        removed_files += _delete_session_sidecars(date, output_dir, include_full=True)
+    for date in kept:
+        if slim_full_session(date, output_dir):
+            slimmed += 1
+        removed_files += _delete_session_sidecars(date, output_dir, include_full=False)
+    return {
+        "kept": kept,
+        "dropped": dropped,
+        "removed_files": removed_files,
+        "slimmed": slimmed,
+    }
 
 
 def scan_eod_cpr(

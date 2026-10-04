@@ -81,11 +81,17 @@ class TestSiteBuild(unittest.TestCase):
             self.assertIn("Bullish CPR", html)
             self.assertIn("Bullish Bias", html)
             self.assertIn('data-tab="bullish_bias"', html)
-            self.assertIn('app.js?v=9', html)
+            self.assertIn('app.js?v=10', html)
             self.assertIn("Strategy_Type", payload["tables"]["full"][0])
             self.assertIn("Strategy_Explanation", payload["tables"]["full"][0])
-            self.assertIn("wide", payload["tables"])
-            self.assertIn("bullish_bias", payload["tables"])
+            self.assertNotIn("wide", payload["tables"])
+            self.assertNotIn("narrow", payload["tables"])
+            self.assertNotIn("moderate", payload["tables"])
+            self.assertNotIn("bullish_bias", payload["tables"])
+            self.assertIn("generated_at_utc", payload)
+            self.assertIn("payload.json?v=", html)
+            self.assertNotIn('src="assets/lightweight-charts', html)
+            self.assertFalse((site / "cpr_tradingview_dashboard.html").exists())
             self.assertIn('id="symbolDrawer"', html)
             self.assertIn('id="drawerBackdrop"', html)
             app_js = (site / "assets" / "app.js").read_text(encoding="utf-8")
@@ -97,6 +103,12 @@ class TestSiteBuild(unittest.TestCase):
             self.assertIn('["Bullish Bias", d.bullish_bias]', app_js)
             self.assertIn("strict narrow CPR + close above band + bullish geometry", app_js)
             self.assertIn("all bullish CPR geometry; not necessarily a narrow breakout", app_js)
+            self.assertIn("DERIVED_TABS", app_js)
+            self.assertIn("PAGE_SIZE", app_js)
+            self.assertIn("searchTimer", app_js)
+            self.assertIn("loadLightweightCharts", app_js)
+            self.assertNotIn('cache: "no-cache"', app_js)
+            self.assertNotIn("cpr_tradingview_dashboard.html", app_js)
             self.assertIn(".symbol-drawer", css)
             self.assertIn(".cpr-chart", css)
             self.assertIn(".badge.confirmed", css)
@@ -144,6 +156,35 @@ class TestSiteBuild(unittest.TestCase):
             self.assertEqual(json.loads((site / "archive.json").read_text()), dates)
             self.assertFalse((site / "archive" / "20260811").exists())
             self.assertTrue(scan_csv_path("full", "20260811", out).exists())
+
+    def test_incremental_build_reuses_unchanged_archive_pages(self):
+        cash = normalize_bhavcopy(_sample_cash(), cash_only=True)
+        cash = tag_fo_symbols(cash, pd.DataFrame({"SYMBOL": ["AAA"]}))
+        cash = apply_bullish_cpr_filters(compute_cpr(cash))
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            site = Path(tmp) / "site"
+            for date in ("20260812", "20260813"):
+                export_results(cash, date, output_dir=out, verbose=False)
+            build_site(out, site, max_sessions=2)
+            older = site / "archive" / "20260812" / "payload.json"
+            before = older.stat().st_mtime_ns
+            calls = []
+            import eod_site
+
+            original = eod_site._with_latest_ai
+
+            def _spy(result):
+                calls.append(result.date)
+                return result
+
+            eod_site._with_latest_ai = _spy
+            try:
+                build_site(out, site, max_sessions=2)
+            finally:
+                eod_site._with_latest_ai = original
+            self.assertEqual(older.stat().st_mtime_ns, before)
+            self.assertEqual(calls, ["20260813"])
 
 
 if __name__ == "__main__":

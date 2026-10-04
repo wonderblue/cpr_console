@@ -181,12 +181,15 @@ CI uses the smaller dependency set in `requirements-ci.txt`.
 Rebuild the public-site artifact from committed scans:
 
 ```bash
-python eod_publish.py --site-only --max-sessions 60
+python eod_publish.py --site-only --max-sessions 20
 ```
 
-The Pages artifact intentionally contains only the latest 60 sessions. The
-complete source CSV archive remains under `cpr_output/YYYY/MM/`. Use
-`python eod_site.py --max-sessions 0` only for a local full-history build.
+The Pages artifact contains the latest 20 sessions. The committed scan archive
+keeps a rolling 252 sessions (the scanner lookback): a slim `cpr_full` CSV
+plus Parquet. Narrow, moderate, wide, and bullish-bias views are derived when
+the site is built. Weekly and monthly frames are stored once per completed
+period. Use `python eod_site.py --max-sessions 0` only for a local build of
+every retained session.
 
 Before publication, the pipeline validates required columns, source freshness,
 minimum universe size, abnormal row-count drops, archive depth and total site
@@ -289,7 +292,7 @@ class MyBrokerDataProvider:
 
 - **No server-side alerts**: EOD alert rules are evaluated in the browser against the loaded published session.
 - **Browser-local preferences**: EOD saved views and watchlists remain in that browser.
-- **Bounded public archive**: Pages carries 60 sessions; full scan CSV history remains in the repository.
+- **Bounded public archive**: Pages carries 20 sessions. The committed scan archive keeps 252 sessions.
 - **Backtest scope**: Intraday breakout history is constrained by Yahoo interval limits.
 
 ### Technical

@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 50
 
       - uses: actions/setup-python@v5
         with:
@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: cpr_output/bhavcopy
-          key: bhavcopy-${{ runner.os }}-${{ github.run_id }}
+          key: bhavcopy-${{ runner.os }}-v1
           restore-keys: |
             bhavcopy-${{ runner.os }}-
 

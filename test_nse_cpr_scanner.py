@@ -131,8 +131,16 @@ class TestExport(unittest.TestCase):
         self.assertTrue((narrow["CPR_Class"] == "Narrow").all() or narrow.empty)
         with TemporaryDirectory() as tmp:
             result = export_results(cash, "20260813", output_dir=Path(tmp))
-            self.assertTrue(scan_csv_path("full", "20260813", Path(tmp)).exists())
-            self.assertTrue(scan_csv_path("best", "20260813", Path(tmp)).exists())
+            full_path = scan_csv_path("full", "20260813", Path(tmp))
+            self.assertTrue(full_path.exists())
+            self.assertFalse(scan_csv_path("best", "20260813", Path(tmp)).exists())
+            self.assertFalse(scan_csv_path("wide", "20260813", Path(tmp)).exists())
+            header = pd.read_csv(full_path, nrows=0).columns
+            self.assertNotIn("TradDt", header)
+            self.assertNotIn("ISIN", header)
+            from cpr_parquet import parquet_session_path
+
+            self.assertTrue(parquet_session_path("20260813", Path(tmp)).exists())
             self.assertEqual(result.date, "20260813")
             self.assertFalse(result.top20.empty)
 
@@ -180,8 +188,37 @@ class TestExport(unittest.TestCase):
                 seed_bhavcopy_cache(cash, s, output_dir=out)
                 export_results(cash, s, output_dir=out, verbose=False)
             backfill_htf_scans(sessions[-1], output_dir=out, lookback=130)
-            self.assertTrue(scan_csv_path("weekly", sessions[-1], out).exists())
-            self.assertTrue(scan_csv_path("monthly", sessions[-1], out).exists())
+            from nse_cpr_scanner import htf_frame_path, last_complete_period_end
+
+            week_end = last_complete_period_end(sessions[-1], "W-FRI")
+            month_end = last_complete_period_end(sessions[-1], "M")
+            self.assertTrue(htf_frame_path("weekly", week_end, out).exists())
+            self.assertTrue(htf_frame_path("monthly", month_end, out).exists())
+            self.assertFalse(scan_csv_path("weekly", sessions[-1], out).exists())
+            weekly_files = list((out / "htf" / "weekly").glob("*.csv"))
+            self.assertLess(len(weekly_files), 40)
+
+    def test_prune_keeps_lookback_and_drops_shortlists(self):
+        cash = normalize_bhavcopy(_udi_cash(), cash_only=True)
+        cash = apply_bullish_cpr_filters(compute_cpr(cash))
+        cash["TradDt"] = "2026-08-13"
+        cash["ISIN"] = "INE000000000"
+        from nse_cpr_scanner import prune_scan_archive
+
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            for date in ("20260811", "20260812", "20260813"):
+                export_results(cash, date, output_dir=out, verbose=False)
+                # A duplicate shortlist, as older publishes used to commit.
+                scan_csv_path("wide", date, out).write_text("SYMBOL\nAAA\n", encoding="utf-8")
+            pruned = prune_scan_archive(out, keep=2)
+            self.assertEqual(pruned["dropped"], ["20260811"])
+            self.assertFalse(scan_csv_path("full", "20260811", out).exists())
+            self.assertTrue(scan_csv_path("full", "20260813", out).exists())
+            self.assertFalse(scan_csv_path("wide", "20260813", out).exists())
+            header = list(pd.read_csv(scan_csv_path("full", "20260813", out), nrows=0).columns)
+            self.assertNotIn("TradDt", header)
+            self.assertNotIn("ISIN", header)
 
 
 class TestEquityAndIndustry(unittest.TestCase):
