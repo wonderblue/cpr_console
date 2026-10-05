@@ -16,7 +16,7 @@ import html
 import json
 import shutil
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -36,6 +36,7 @@ from publication_contract import read_manifest
 
 SITE_DIR = Path("site")
 DEFAULT_PUBLISHED_SESSIONS = 20
+SITE_TEMPLATE_VERSION = "10"
 ROUND_2 = {
     "OPEN",
     "HIGH",
@@ -290,15 +291,10 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
         monthly_top20_df = compute_monthly_top_watchlist(result.monthly, n=20, daily_df=result.full)
 
     jcurve_df = getattr(result, "jcurve", pd.DataFrame())
-    if jcurve_df is not None and not jcurve_df.empty:
-        try:
-            from ai_validator import attach_ai_validation
-            jcurve_df = attach_ai_validation(jcurve_df)
-        except Exception:
-            pass
 
     return {
         "date": result.date,
+        "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "label": _date_label(result.date),
         "home": home_href,
         "dates": [{"id": d, "label": _date_label(d)} for d in dates],
@@ -324,16 +320,12 @@ def _payload(result: ScanResult, downloads: dict, dates: Iterable[str], home_hre
             "full": _records(result.full),
             "gainers": _records(gainers_df),
             "losers": _records(losers_df),
-            "narrow": _records(result.narrow),
-            "moderate": _records(result.moderate) if hasattr(result, "moderate") and not result.moderate.empty else [],
             "bullish": _records(result.bullish),
-            "bullish_bias": _records(result.bullish_bias),
             "bearish": _records(result.bearish),
             "top20": _records(result.top20),
             "best": _records(result.best) if not result.best.empty else [],
             "jcurve": _records(jcurve_df) if jcurve_df is not None and not jcurve_df.empty else [],
             "watchlist": _records(result.watchlist) if not result.watchlist.empty else [],
-            "wide": _records(result.wide) if not result.wide.empty else [],
             "follow": _records(result.follow_through) if not result.follow_through.empty else [],
             "weekly": _records(result.weekly) if not result.weekly.empty else [],
             "weekly_top20": _records(weekly_top20_df) if not weekly_top20_df.empty else [],
@@ -361,8 +353,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
   <meta name="data-session" content="{html.escape(payload["date"], quote=True)}"/>
   <title>EOD CPR · {html.escape(payload["label"])}</title>
   <base href="{asset_prefix}">
-  <link rel="stylesheet" href="assets/style.css?v=8"/>
-  <script src="assets/lightweight-charts.standalone.production.js"></script>
+  <link rel="stylesheet" href="assets/style.css?v=9"/>
 </head>
 <body>
   <!-- Toast Notification -->
@@ -548,6 +539,7 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
       <tbody id="body"></tbody>
     </table>
   </div>
+  <div class="pager" id="pager" hidden></div>
 
   <!-- Side Detail Drawer -->
   <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
@@ -620,8 +612,8 @@ def _page_html(payload: dict, asset_prefix: str) -> str:
     </div>
   </footer>
 
-  <script>window.CPR_PAYLOAD_URL = "payload.json";</script>
-  <script src="assets/app.js?v=9"></script>
+  <script>window.CPR_PAYLOAD_URL = "payload.json?v={html.escape(str(payload.get("generated_at_utc") or ""), quote=True)}";</script>
+  <script src="assets/app.js?v=10"></script>
 </body>
 </html>
 """
@@ -1105,6 +1097,9 @@ tr[data-symbol]:hover td { background: var(--card-hover); }
 
 .empty-guide { margin: 16px 20px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--muted); text-align: center; }
 .empty-guide button { margin-left: 8px; background: var(--accent); color: #000; border: 0; border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; font-weight: 700; }
+.pager { display: flex; gap: 12px; align-items: center; justify-content: flex-end; padding: 8px 20px 18px; color: var(--muted); font-size: 12px; }
+.pager button { background: var(--panel, #161b22); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; }
+.pager button:disabled { opacity: 0.4; cursor: default; }
 
 .watch-star { color: var(--amber); font-weight: 700; margin-right: 4px; }
 .app-footer { padding: 12px 20px; color: var(--muted); font-size: 11px; text-align: center; border-top: 1px solid var(--line); }
@@ -1130,6 +1125,15 @@ let currentPreset = "all";
 let sort = {col: null, asc: true};
 let drawerTrigger = null;
 let activeTvChart = null;
+let pageIndex = 0;
+let searchTimer = null;
+const PAGE_SIZE = 100;
+const DERIVED_TABS = {
+  narrow: row => row.CPR_Class === "Narrow",
+  moderate: row => row.CPR_Class === "Moderate",
+  wide: row => row.CPR_Class === "Wide" || row.Strategy_Type === "Wide CPR",
+  bullish_bias: row => row.Bias === "Bullish",
+};
 
 function $(id) { return document.getElementById(id); }
 
@@ -1356,9 +1360,34 @@ function fillIndustry() {
   });
 }
 
-function fillDates() {
+function formatSessionId(id) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const text = String(id || "");
+  if (text.length !== 8) return text;
+  const month = Number(text.slice(4, 6)) - 1;
+  return `${Number(text.slice(6, 8))} ${months[month] || ""} ${text.slice(0, 4)}`.trim();
+}
+
+async function archiveDates() {
+  const embedded = Array.isArray(DATA.dates) ? DATA.dates : [];
+  try {
+    const url = new URL("archive.json", new URL(DATA.home || "./", window.location.href));
+    const response = await fetch(url.href);
+    if (!response.ok) return embedded;
+    const ids = await response.json();
+    if (!Array.isArray(ids) || !ids.length) return embedded;
+    const labels = Object.fromEntries(embedded.map(item => [item.id, item.label]));
+    return ids.map(id => ({ id, label: labels[id] || formatSessionId(id) }));
+  } catch (e) {
+    return embedded;
+  }
+}
+
+async function fillDates() {
   const sel = $("dateSelect");
-  DATA.dates.forEach(d => {
+  const dates = await archiveDates();
+  DATA.dates = dates;
+  dates.forEach(d => {
     const opt = document.createElement("option");
     opt.value = d.id;
     opt.textContent = d.label;
@@ -1438,7 +1467,6 @@ function copyWatchlist() {
 function downloads() {
   const d = DATA.downloads;
   $("downloads").innerHTML = [
-    ["🚀 TradingView Charts (Interactive)", "cpr_tradingview_dashboard.html"],
     ["Full Universe CSV", d.full],
     ["Best Today Setups CSV", d.best],
     ["J-Curve Setups CSV", d.jcurve],
@@ -1552,6 +1580,13 @@ function parseFilters() {
   } catch (e) {}
 }
 
+function tabSource(name) {
+  const full = (DATA && DATA.tables && DATA.tables.full) || [];
+  if (name === "mylist") return full.filter(r => isWatched(r.SYMBOL));
+  if (DERIVED_TABS[name]) return full.filter(DERIVED_TABS[name]);
+  return (DATA.tables && DATA.tables[name]) || [];
+}
+
 function rows() {
   const q = $("search").value.trim().toUpperCase();
   const segment = $("segment").value;
@@ -1563,7 +1598,7 @@ function rows() {
   const ownNarrow = $("ownNarrow").value;
   const niftyOnly = $("niftyOnly").checked;
   const hideUncl = $("hideUnclassified").checked;
-  const source = tab === "mylist" ? (DATA.tables.full || []).filter(r => isWatched(r.SYMBOL)) : (DATA.tables[tab] || []);
+  const source = tabSource(tab);
   return source.filter(r => {
     if (q && !(String(r.SYMBOL || "").toUpperCase().includes(q) || String(r.NAME || "").toUpperCase().includes(q))) return false;
     if (segment !== "Any" && r.Segment !== segment) return false;
@@ -1644,7 +1679,38 @@ function cprMiniChart(row) {
   </div>`;
 }
 
+let chartsPromise = null;
+function loadLightweightCharts() {
+  if (window.LightweightCharts) return Promise.resolve(window.LightweightCharts);
+  if (chartsPromise) return chartsPromise;
+  chartsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "assets/lightweight-charts.standalone.production.js";
+    script.async = true;
+    script.onload = () => resolve(window.LightweightCharts);
+    script.onerror = () => reject(new Error("chart library failed"));
+    document.head.appendChild(script);
+  });
+  return chartsPromise;
+}
+
 function initTradingViewChart(row) {
+  const container = $("tv-chart-container");
+  if (!container) return;
+  if (typeof LightweightCharts === "undefined") {
+    container.innerHTML = cprMiniChart(row);
+    const symbol = row.SYMBOL || "Symbol";
+    loadLightweightCharts().then(() => {
+      if ($("symbolDrawer").hidden) return;
+      if ($("drawerTitle").textContent !== symbol) return;
+      paintTradingViewChart(row);
+    }).catch(() => {});
+    return;
+  }
+  paintTradingViewChart(row);
+}
+
+function paintTradingViewChart(row) {
   const container = $("tv-chart-container");
   if (!container) return;
   container.innerHTML = "";
@@ -1815,6 +1881,22 @@ function renderSectorHeatmap() {
   $("heatmapBackdrop").hidden = false;
 }
 
+function renderPager(total) {
+  const el = $("pager");
+  if (!el) return;
+  const paged = tab === "full" && total > PAGE_SIZE;
+  el.hidden = !paged;
+  if (!paged) { el.innerHTML = ""; return; }
+  const pages = Math.ceil(total / PAGE_SIZE);
+  const start = pageIndex * PAGE_SIZE + 1;
+  const end = Math.min(total, (pageIndex + 1) * PAGE_SIZE);
+  el.innerHTML = `<button type="button" id="pagePrev" ${pageIndex === 0 ? "disabled" : ""}>Prev</button><span>${start}–${end} of ${total}</span><button type="button" id="pageNext" ${pageIndex >= pages - 1 ? "disabled" : ""}>Next</button>`;
+  const prev = $("pagePrev");
+  const next = $("pageNext");
+  if (prev) prev.addEventListener("click", () => { if (pageIndex > 0) { pageIndex -= 1; render(); } });
+  if (next) next.addEventListener("click", () => { if (pageIndex < pages - 1) { pageIndex += 1; render(); } });
+}
+
 function render() {
   const data = sortRows(rows());
   const htf = DATA.htf || {};
@@ -1829,7 +1911,17 @@ function render() {
   if (tab === "mylist") extra = " · symbols saved in this browser";
   if (tab === "bullish") extra = " · strict narrow CPR + close above band + bullish geometry";
   if (tab === "bullish_bias") extra = " · all bullish CPR geometry; not necessarily a narrow breakout";
-  $("count").textContent = `${data.length} rows${extra}`;
+  let view = data;
+  let pageNote = "";
+  if (tab === "full" && data.length > PAGE_SIZE) {
+    const pages = Math.ceil(data.length / PAGE_SIZE);
+    if (pageIndex >= pages) pageIndex = 0;
+    view = data.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE);
+    pageNote = ` · page ${pageIndex + 1}/${pages}`;
+  } else {
+    pageIndex = tab === "full" ? pageIndex : 0;
+  }
+  $("count").textContent = `${data.length} rows${extra}${pageNote}`;
   const badgeEl = $("tvCountBadge");
   if (badgeEl) badgeEl.textContent = String(data.length);
 
@@ -1848,11 +1940,11 @@ function render() {
   $("head").innerHTML = "<tr>" + cols.map(c =>
     `<th data-col="${c}" class="${sort.col===c?(sort.asc?'sorted asc':'sorted desc'):''}">${c.replaceAll("_"," ")}${sort.col===c?(sort.asc?' ▲':' ▼'):''}</th>`
   ).join("") + "</tr>";
-  $("body").innerHTML = data.map((r, index) =>
+  $("body").innerHTML = view.map((r, index) =>
     `<tr tabindex="0" data-symbol="${esc(r.SYMBOL)}" data-index="${index}" title="Open symbol context">` + cols.map(c => `<td class="${klass(c, r[c])}">${cellHtml(c, r[c], r)}</td>`).join("") + "</tr>"
   ).join("");
   document.querySelectorAll("#body tr[data-index]").forEach(tr => {
-    const open = () => openDrawer(data[Number(tr.dataset.index)], tr);
+    const open = () => openDrawer(view[Number(tr.dataset.index)], tr);
     tr.addEventListener("click", open);
     tr.addEventListener("keydown", event => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
@@ -1863,6 +1955,7 @@ function render() {
     if (sort.col === col) sort.asc = !sort.asc; else { sort.col = col; sort.asc = true; }
     render();
   }));
+  renderPager(data.length);
   syncUrl();
 }
 
@@ -1873,6 +1966,7 @@ function selectTab(nextTab) {
   selected.classList.add("on");
   selected.setAttribute("aria-selected", "true");
   tab = nextTab;
+  pageIndex = 0;
   if (nextTab === "full") {
     currentPreset = "all";
     document.querySelectorAll(".strategy-pills .pill").forEach(p => p.classList.remove("active"));
@@ -1984,9 +2078,15 @@ document.querySelectorAll(".tabs button").forEach(btn => {
   });
 });
 
-["search","segment","industry","klass","bias","overlay","setup","ownNarrow","columnMode"].forEach(id => {
+["segment","industry","klass","bias","overlay","setup","ownNarrow","columnMode"].forEach(id => {
   const el = $(id);
-  if (el) el.addEventListener("input", render);
+  if (el) el.addEventListener("input", () => { pageIndex = 0; render(); });
+});
+const searchEl = $("search");
+if (searchEl) searchEl.addEventListener("input", () => {
+  pageIndex = 0;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(render, 180);
 });
 ["niftyOnly","hideUnclassified"].forEach(id => {
   const el = $(id);
@@ -2006,11 +2106,11 @@ async function boot() {
     return;
   }
   try {
-    const response = await fetch(new URL(PAYLOAD_URL, window.location.href).href, {cache: "no-cache"});
+    const response = await fetch(new URL(PAYLOAD_URL, window.location.href).href);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     DATA = await response.json();
     parseFilters();
-    fillDates();
+    await fillDates();
     fillIndustry();
     metrics();
     publicationStatus();
@@ -2034,15 +2134,10 @@ def _write_assets(site_dir: Path) -> None:
     (assets / "app.js").write_text(JS.strip() + "\n", encoding="utf-8")
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")
     
-    # Copy Lightweight Charts standalone library if present
+    # Loaded by the symbol drawer. The standalone TradingView HTML page is not linked.
     lw_chart = Path("lightweight-charts.standalone.production.js")
     if lw_chart.exists():
         shutil.copy2(lw_chart, assets / "lightweight-charts.standalone.production.js")
-        
-    # Include standalone interactive TradingView CPR dashboard if present
-    tv_dash = Path("cpr_tradingview_dashboard.html")
-    if tv_dash.exists():
-        shutil.copy2(tv_dash, site_dir / "cpr_tradingview_dashboard.html")
 
 
 def _write_page(
@@ -2065,33 +2160,84 @@ def _write_page(
     (dest / "manifest.json").write_text(json.dumps({"date": result.date, "metrics": payload["metrics"]}, indent=2), encoding="utf-8")
 
 
+def _with_latest_ai(result: ScanResult) -> ScanResult:
+    """Run prop-desk validation for the session being published, not for archive pages."""
+    jcurve_df = getattr(result, "jcurve", pd.DataFrame())
+    if jcurve_df is None or jcurve_df.empty:
+        return result
+    try:
+        from ai_validator import attach_ai_validation
+
+        result.jcurve = attach_ai_validation(jcurve_df)
+    except Exception:
+        pass
+    return result
+
+
+def _archive_stamp(date: str, output_dir: Path) -> str:
+    from nse_cpr_scanner import htf_frame_path, last_complete_period_end, resolve_scan_csv
+    from cpr_parquet import parquet_session_path
+
+    bits = [SITE_TEMPLATE_VERSION, date]
+    candidates = [
+        resolve_scan_csv("full", date, output_dir),
+        parquet_session_path(date, output_dir),
+        htf_frame_path("weekly", last_complete_period_end(date, "W-FRI"), output_dir),
+        htf_frame_path("monthly", last_complete_period_end(date, "M"), output_dir),
+    ]
+    for path in candidates:
+        if path.is_file():
+            stat = path.stat()
+            bits.append(f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}")
+    return "|".join(bits)
+
+
 def build_site(
     output_dir: Path = Path("cpr_output"),
     site_dir: Path = SITE_DIR,
     max_sessions: Optional[int] = DEFAULT_PUBLISHED_SESSIONS,
+    incremental: bool = True,
 ) -> List[str]:
     all_dates = discover_scan_dates(output_dir)
     if not all_dates:
-        raise FileNotFoundError(f"No cpr_full_*.csv files in {output_dir}")
+        raise FileNotFoundError(f"No cpr_full scans in {output_dir}")
     dates = all_dates[:max_sessions] if max_sessions is not None and max_sessions > 0 else all_dates
 
     publication = read_manifest(output_dir) or {}
-
-    if site_dir.exists():
-        shutil.rmtree(site_dir)
-    site_dir.mkdir(parents=True)
+    have_site = incremental and (site_dir / "archive.json").is_file()
+    if not have_site:
+        if site_dir.exists():
+            shutil.rmtree(site_dir)
+        site_dir.mkdir(parents=True)
+    else:
+        site_dir.mkdir(parents=True, exist_ok=True)
     _write_assets(site_dir)
 
     latest = dates[0]
+    reused = 0
     for date in dates:
+        archive_dir = site_dir / "archive" / date
+        stamp = _archive_stamp(date, output_dir)
+        stamp_path = archive_dir / ".build-stamp"
+        is_latest = date == latest
+        if (
+            incremental
+            and not is_latest
+            and stamp_path.is_file()
+            and stamp_path.read_text(encoding="utf-8").strip() == stamp
+            and (archive_dir / "payload.json").is_file()
+            and (archive_dir / "index.html").is_file()
+        ):
+            reused += 1
+            continue
         source_index = all_dates.index(date)
         prev = all_dates[source_index + 1] if source_index + 1 < len(all_dates) else None
         result = load_scan_result(date, output_dir=output_dir, previous=prev)
-        if date == latest and result.weekly.empty:
+        if is_latest and result.weekly.empty:
             result = attach_htf_to_result(result, output_dir=output_dir, write_csv=True)
-        if date == latest:
+        if is_latest:
+            result = _with_latest_ai(result)
             _write_page(result, site_dir, dates, home_href="./", asset_prefix="./", publication=publication)
-        archive_dir = site_dir / "archive" / date
         _write_page(
             result,
             archive_dir,
@@ -2101,6 +2247,14 @@ def build_site(
             publication=publication,
             include_downloads=False,
         )
+        stamp_path.write_text(_archive_stamp(date, output_dir) + "\n", encoding="utf-8")
+
+    archive_root = site_dir / "archive"
+    keep = set(dates)
+    if archive_root.exists():
+        for child in archive_root.iterdir():
+            if child.is_dir() and child.name not in keep:
+                shutil.rmtree(child)
 
     archive_index = site_dir / "archive" / "index.html"
     links = "\n".join(
@@ -2119,7 +2273,7 @@ def build_site(
     (site_dir / "publication_manifest.json").write_text(
         json.dumps(publication, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    print(f"✓ Site: {site_dir.resolve()} ({len(dates)} session(s), latest {latest})")
+    print(f"✓ Site: {site_dir.resolve()} ({len(dates)} session(s), latest {latest}, reused {reused})")
     return dates
 
 
@@ -2148,8 +2302,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         help="Recent sessions to publish; use 0 for the full archive",
     )
     parser.add_argument("--serve", type=int, nargs="?", const=8504, help="Serve preview (default port 8504)")
+    parser.add_argument("--rebuild", action="store_true", help="Rewrite every retained session page")
     args = parser.parse_args(argv)
-    build_site(Path(args.output_dir), Path(args.site_dir), max_sessions=args.max_sessions)
+    build_site(
+        Path(args.output_dir),
+        Path(args.site_dir),
+        max_sessions=args.max_sessions,
+        incremental=not args.rebuild,
+    )
     if args.serve:
         serve(Path(args.site_dir), args.serve)
 

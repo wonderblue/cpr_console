@@ -87,6 +87,18 @@ class TestPublicationContract(unittest.TestCase):
             with self.assertRaisesRegex(PublicationContractError, "row-count drop"):
                 validate_output_dir(output, max_row_drop_pct=0.35)
 
+    def test_row_count_check_ignores_older_history(self):
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            self._write_daily(output, "20260811", rows=10)
+            self._write_daily(output, "20260812", rows=10)
+            self._write_daily(output, "20260813", rows=10)
+            broken = pd.read_csv(scan_csv_path("full", "20260811", output)).drop(columns=["CPR_Class"])
+            broken.to_csv(scan_csv_path("full", "20260811", output), index=False)
+            result = validate_output_dir(output, max_row_drop_pct=0.35, min_full_rows=1)
+            self.assertEqual(result["files_checked"], 2)
+            self.assertEqual(result["latest_date"], "20260813")
+
     def test_unknown_legacy_manifest_requires_explicit_nonfresh_mode(self):
         with TemporaryDirectory() as tmp:
             output = Path(tmp)

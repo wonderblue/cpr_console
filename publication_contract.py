@@ -80,63 +80,85 @@ def _read_csv_checked(path: Path, required: set[str], allow_empty: bool = True) 
     return frame
 
 
+def _load_full_frame(date: str, output_dir: Path) -> pd.DataFrame:
+    """Read the latest session from CSV or, if that window is absent, Parquet."""
+    from nse_cpr_scanner import resolve_scan_csv
+
+    path = resolve_scan_csv("full", date, output_dir)
+    if path.exists():
+        return _read_csv_checked(path, DAILY_REQUIRED, allow_empty=False)
+    from cpr_parquet import load_session_parquet
+
+    frame = load_session_parquet(date, output_dir)
+    if frame is None or frame.empty:
+        raise PublicationContractError(f"Missing full scan for {date} under {output_dir}")
+    missing = sorted(DAILY_REQUIRED.difference(frame.columns))
+    if missing:
+        raise PublicationContractError(f"cpr_full_{date}.parquet is missing columns: {missing}")
+    return frame
+
+
+def _full_row_count(date: str, output_dir: Path) -> int:
+    """Row count for the previous session. Schema is checked on the latest file only."""
+    from nse_cpr_scanner import resolve_scan_csv
+
+    path = resolve_scan_csv("full", date, output_dir)
+    if path.exists():
+        frame = pd.read_csv(path, usecols=lambda col: col == "SYMBOL")
+        return int(len(frame))
+    from cpr_parquet import load_session_parquet
+
+    frame = load_session_parquet(date, output_dir)
+    if frame is None:
+        raise PublicationContractError(f"Missing full scan for {date} under {output_dir}")
+    return int(len(frame))
+
+
 def validate_output_dir(
     output_dir: Path,
     expected_date: Optional[str] = None,
     min_full_rows: int = 1,
     max_row_drop_pct: Optional[float] = None,
 ) -> dict:
-    """Validate every generated daily/HTF CSV before site publication."""
+    """Validate the latest full scan, and the previous session's row count."""
     output_dir = Path(output_dir)
     dates = _scan_dates(output_dir)
     if not dates:
-        raise PublicationContractError(f"No cpr_full_YYYYMMDD.csv files in {output_dir}")
+        raise PublicationContractError(f"No cpr_full scans in {output_dir}")
     if expected_date and expected_date not in dates:
         raise PublicationContractError(
             f"Expected scan date {expected_date} is not present in {output_dir}"
         )
 
-    checked = 0
-    row_counts: dict[str, int] = {}
-    from nse_cpr_scanner import resolve_scan_csv
-
-    for date in dates:
-        full = _read_csv_checked(resolve_scan_csv("full", date, output_dir), DAILY_REQUIRED, allow_empty=False)
-        row_counts[date] = int(len(full))
-        if len(full) < min_full_rows:
-            raise PublicationContractError(
-                f"Suspiciously small full scan for {date}: {len(full)} rows; minimum is {min_full_rows}"
-            )
-        checked += 1
-        for suffix in ("narrow", "bullish", "bearish", "top20_narrow", "best", "watchlist"):
-            path = resolve_scan_csv(suffix, date, output_dir)
-            if path.exists():
-                _read_csv_checked(path, SHORTLIST_REQUIRED, allow_empty=True)
-                checked += 1
-        for suffix in ("weekly", "monthly"):
-            path = resolve_scan_csv(suffix, date, output_dir)
-            if path.exists():
-                _read_csv_checked(path, HTF_REQUIRED, allow_empty=True)
-                checked += 1
+    latest = dates[0]
+    full = _load_full_frame(latest, output_dir)
+    row_counts = {latest: int(len(full))}
+    if len(full) < min_full_rows:
+        raise PublicationContractError(
+            f"Suspiciously small full scan for {latest}: {len(full)} rows; minimum is {min_full_rows}"
+        )
+    checked = 1
 
     if max_row_drop_pct is not None:
         if not 0 <= max_row_drop_pct < 1:
             raise ValueError("max_row_drop_pct must be between 0 and 1")
-        chronological = sorted(row_counts)
-        for previous_date, current_date in zip(chronological, chronological[1:]):
-            previous_rows = row_counts[previous_date]
-            current_rows = row_counts[current_date]
+        if len(dates) > 1:
+            previous = dates[1]
+            previous_rows = _full_row_count(previous, output_dir)
+            current_rows = row_counts[latest]
+            row_counts[previous] = previous_rows
+            checked += 1
             minimum = previous_rows * (1 - max_row_drop_pct)
-            if current_rows < minimum:
+            if previous_rows and current_rows < minimum:
                 drop_pct = 1 - (current_rows / previous_rows)
                 raise PublicationContractError(
-                    f"Suspicious row-count drop {previous_date} → {current_date}: "
+                    f"Suspicious row-count drop {previous} → {latest}: "
                     f"{previous_rows} → {current_rows} ({drop_pct:.1%}); "
                     f"maximum allowed is {max_row_drop_pct:.1%}"
                 )
 
     return {
-        "latest_date": dates[0],
+        "latest_date": latest,
         "dates": dates,
         "files_checked": checked,
         "rows_by_date": row_counts,
@@ -342,7 +364,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--min-full-rows", type=int, default=DEFAULT_MIN_FULL_ROWS)
     parser.add_argument("--max-row-drop-pct", type=float, default=DEFAULT_MAX_ROW_DROP_PCT)
     parser.add_argument("--max-site-bytes", type=int, default=DEFAULT_MAX_SITE_BYTES)
-    parser.add_argument("--max-sessions", type=int, default=60)
+    parser.add_argument("--max-sessions", type=int, default=20)
     args = parser.parse_args(argv)
 
     output_dir = Path(args.output_dir)

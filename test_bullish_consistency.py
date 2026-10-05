@@ -44,16 +44,10 @@ class TestBullishViews(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp)
             export_results(frame, "20260826", output_dir=output, verbose=False)
-            bias_path = scan_csv_path("bullish_bias", "20260826", output)
-            strict_path = scan_csv_path("bullish", "20260826", output)
-            self.assertTrue(bias_path.exists())
-            self.assertTrue(strict_path.exists())
-            self.assertEqual(
-                set(pd.read_csv(bias_path)["SYMBOL"]),
-                {"HINDZINC", "TVSSRICHAK", "NARROWLONG"},
-            )
-            self.assertEqual(list(pd.read_csv(strict_path)["SYMBOL"]), ["NARROWLONG"])
+            self.assertFalse(scan_csv_path("bullish_bias", "20260826", output).exists())
+            self.assertFalse(scan_csv_path("bullish", "20260826", output).exists())
             loaded = load_scan_result("20260826", output_dir=output)
+            self.assertEqual(list(loaded.bullish["SYMBOL"]), ["NARROWLONG"])
             self.assertEqual(
                 set(loaded.bullish_bias["SYMBOL"]),
                 {"HINDZINC", "TVSSRICHAK", "NARROWLONG"},
