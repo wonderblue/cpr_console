@@ -102,7 +102,17 @@ jobs:
             echo "No new CSVs"
           else
             git commit -m "EOD CPR scan $(date -u +%Y%m%d)"
-            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git fetch origin "${GITHUB_REF_NAME}"
+            # A previous attempt/run may already have pushed this session's
+            # archive. Re-scans never byte-match (publication_manifest.json
+            # stamps generated_at_utc), so the rebase can conflict. The remote
+            # version is canonical - keep it instead of failing the run.
+            if ! git rebase "origin/${GITHUB_REF_NAME}"; then
+              echo "Rebase conflicted; remote archive already covers this session. Keeping remote."
+              git rebase --abort
+              git reset --hard "origin/${GITHUB_REF_NAME}"
+            fi
+                  
             git push origin HEAD:"${GITHUB_REF_NAME}"
           fi
 
