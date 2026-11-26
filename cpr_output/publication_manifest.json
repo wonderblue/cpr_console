@@ -1,12 +1,12 @@
 {
-  "actual_data_date": "20261125",
+  "actual_data_date": "20261126",
   "freshness": {
     "display": "Source session verified",
     "status": "known"
   },
-  "generated_at_utc": "2026-11-25T20:29:33+00:00",
+  "generated_at_utc": "2026-11-26T20:10:06+00:00",
   "history": {
-    "cached_sessions": 307,
+    "cached_sessions": 308,
     "oldest_cached_date": "20250826",
     "requested_sessions": 252
   },
@@ -14,7 +14,7 @@
   "schema_version": 1,
   "source": {
     "attempted_dates": [
-      "20261125"
+      "20261126"
     ],
     "mode": "latest_available",
     "name": "NSE UDI bhavcopy"
