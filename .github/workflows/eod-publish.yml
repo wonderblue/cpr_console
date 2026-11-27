@@ -27,9 +27,6 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -120,5 +117,29 @@ jobs:
         with:
           path: site
 
-      - id: deploy
+  # Deploy runs as its own job so a flaky deploy can be retried on its own
+  # ("Re-run failed jobs") without re-scanning, and so the artifact has a
+  # moment to become visible to the artifacts API before deploy-pages looks
+  # for it. deploy-pages used to fail within ~1s with 'Found 0 artifact(s)'
+  # right after a successful upload.
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy2.outputs.page_url || steps.deploy1.outputs.page_url }}
+    steps:
+      - name: Let the uploaded artifact become visible
+        run: sleep 20
+
+      - id: deploy1
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retrying deploy
+        if: steps.deploy1.outcome == 'failure'
+        run: sleep 60
+
+      - id: deploy2
+        if: steps.deploy1.outcome == 'failure'
         uses: actions/deploy-pages@v4
